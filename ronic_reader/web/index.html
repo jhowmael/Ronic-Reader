@@ -472,6 +472,7 @@ body.dragging #dropOverlay { display: grid; }
 
 /* ---------- iPhone e janelas estreitas ---------- */
 html.web body { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+.web-hidden { display: none !important; }
 html.web #toolbar { padding-top: env(safe-area-inset-top); height: calc(52px + env(safe-area-inset-top)); }
 html.web #player { bottom: calc(16px + env(safe-area-inset-bottom)); }
 html.web #app.no-sidebar #toolbar { padding-left: 12px; }
@@ -603,11 +604,6 @@ html.web #app.no-sidebar #toolbar { padding-left: 12px; }
     <aside id="inspector" class="panel glass-thick" aria-label="Narrador">
       <div class="panel-head"><h2>Narrador</h2><button class="icon-btn" id="closeInspector" aria-label="Fechar"><svg class="ico" style="width:15px;height:15px"><use href="#i-x"/></svg></button></div>
       <div class="panel-body">
-        <div class="slider-row" style="margin-top:4px">
-          <label for="speed">Velocidade da fala <span id="speedV">1,00×</span></label>
-          <input type="range" id="speed" min="0.5" max="2.5" step="0.05" value="1">
-          <div class="ends"><span>0,5×</span><button class="link" id="speedReset" style="font-size:11px">normal</button><span>2,5×</span></div>
-        </div>
         <div id="narrSection" hidden>
           <div class="group-label">Narração por personagem</div>
           <div id="narrBody"></div>
@@ -1432,14 +1428,12 @@ function setSpeed(x, { save = true } = {}) {
   x = Math.min(2.5, Math.max(0.5, Math.round(x * 20) / 20));
   audio.playbackRate = x;
   $("speedBtn").textContent = fmtSpeed(x);
-  $("speed").value = x; paintRange($("speed"));
-  $("speedV").textContent = x.toFixed(2).replace(".", ",") + "×";
   if (save) { clearTimeout(setSpeed.t); setSpeed.t = setTimeout(() => savePrefs({ speed: x }), 300); prefs.speed = x; }
 }
 function speedMenu() {
   const sp = prefs.speed || 1, b = $("speedBtn").getBoundingClientRect();
   openMenu([{ label: "Velocidade" }, ...SPEEDS.map(x => ({ text: fmtSpeed(x), check: true, on: x === sp,
-    run: () => setSpeed(x) })), "-", { text: "Ajuste fino…", icon: "i-voice", run: () => toggleInspector(true) }], b.right - 150, b.top - 300, $("speedBtn"));
+    run: () => setSpeed(x) }))], b.right - 150, b.top - 300, $("speedBtn"));
   const m = $("menu"), r = m.getBoundingClientRect(); m.style.top = (b.top - r.height - 8) + "px"; m.style.left = (b.right - r.width) + "px";
 }
 
@@ -1511,8 +1505,6 @@ $("nextSeg").onclick = () => book && jumpTo(pos + 1);
 $("turnPrev").onclick = () => goToView(view - 1, -1);
 $("turnNext").onclick = () => goToView(view + 1, 1);
 $("speedBtn").onclick = speedMenu;
-$("speed").addEventListener("input", (e) => setSpeed(+e.target.value));
-$("speedReset").onclick = () => setSpeed(1);
 document.querySelectorAll("#themeSeg button").forEach(b => b.onclick = () => { applyTheme(b.dataset.theme); savePrefs({ theme: b.dataset.theme }); });
 $("exportBtn").onclick = exportMenu;
 $("search").addEventListener("input", renderLibrary);
@@ -1601,7 +1593,7 @@ $("stage").addEventListener("touchend", (e) => {
 refreshState().then(() => {
   if (state.platform === "web") {
     document.documentElement.classList.add("web");
-    $("exportBtn").remove();
+    $("exportBtn").classList.add("web-hidden");   // MP3 só no Mac (fica escondido, não removido)
     document.querySelector('.swatch[data-accent="system"]')?.remove();
     if (matchMedia("(max-width: 760px)").matches && prefs.sidebar !== true) $("app").classList.add("no-sidebar");
   }
