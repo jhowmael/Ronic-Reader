@@ -251,27 +251,72 @@ export function buildEpubBook({ id, name, title, author, chapters: chs }) {
   return { id, name, total_pages: page, aspect: 0.66, title: title || name, author: author || "", format: "epub", segments, chapters };
 }
 
-// ------------------------------------------------------- narração por personagem
-const FIRST_PERSON = /(?<![\p{L}])(eu|me|mim|meu|minha|meus|minhas|comigo)(?![\p{L}])/giu;
-const NARR_ADJ = /\beu\s+(?:estava|estou|era|sou|fui|fiquei|ficara|ficava|andava|vivia|me\s+sentia|me\s+senti|me\s+achava|me\s+achei|parecia|continuava|permaneci|seria|ficaria|estaria)\s+(?:muito\s+|tão\s+|um\s+pouco\s+|meio\s+)?([\p{L}]{4,}?)([oa]s?)(?![\p{L}])/giu;
-const FIXED_F = /\b(eu mesma|obrigada|sozinha|eu própria)(?![\p{L}])/giu;
-const FIXED_M = /\b(eu mesmo|obrigado|sozinho|eu próprio)(?![\p{L}])/giu;
-export function analyzeNarrator(book) {
-  const chapterOf = (i) => { let n = 0; book.chapters.forEach((c, k) => { if (c.segment <= i) n = k; }); return n; };
-  const tot = { F: 0, M: 0, fp: 0, w: 0 }, per = {};
+// ------------------------------------------------------- narração por contexto
+// Mesmas regras de ronic_reader/narration.py: capítulos de ponto de vista ("3 — Briana"),
+// senão 1ª pessoa com gênero pela concordância, senão um narrador só.
+const NB = "(?<![\\p{L}])", NE = "(?![\\p{L}])";
+const FIRST_PERSON = new RegExp(`${NB}(eu|me|mim|meu|minha|meus|minhas|comigo)${NE}`, "giu");
+const NARR_ADJ = new RegExp(`${NB}eu\\s+(?:estava|estou|era|sou|fui|fiquei|ficara|ficava|andava|vivia|me\\s+sentia|me\\s+senti|me\\s+achava|me\\s+achei|parecia|continuava|permaneci|seria|ficaria|estaria)\\s+(?:muito\\s+|tão\\s+|um\\s+pouco\\s+|meio\\s+)?(\\p{L}{4,}?)([oa]s?)${NE}`, "giu");
+const FIXED_F = new RegExp(`${NB}(eu mesma|obrigada|sozinha|eu própria)${NE}`, "giu");
+const FIXED_M = new RegExp(`${NB}(eu mesmo|obrigado|sozinho|eu próprio)${NE}`, "giu");
+const TITLE_PREFIX = /^\s*(?:cap[íi]tulo|parte|chapter)?\s*(?:\d+|[IVXLCDM]+)?\s*[-–—:.·|]*\s*/i;
+const PERSON_NAME = /^[A-ZÀ-Ý][a-zà-ÿ]+(?:\s+[A-ZÀ-Ý][a-zà-ÿ]+)?$/;
+const MALE_A = new Set(["luca", "joshua", "elias", "jonas", "nicolas", "lucas", "thomas", "tomas", "andreas", "mattias"]);
+const FEMALE_O = new Set(["rocio", "consuelo", "socorro", "amparo"]);
+const NOT_NAMES = new Set(["início", "prólogo", "epílogo", "fim", "sobre"]);
+
+export function chapterOf(book, i) {
+  const st = book._starts ||= book.chapters.map((c) => c.segment);
+  let lo = 0, hi = st.length - 1, n = 0;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (st[m] <= i) { n = m; lo = m + 1; } else hi = m - 1; }
+  return n;
+}
+const zero = () => ({ F: 0, M: 0, fp: 0, w: 0 });
+const add = (a, b) => { for (const k in b) a[k] += b[k]; return a; };
+function gender(v, name = "") {
+  if (v.F !== v.M) return v.F > v.M ? "F" : "M";
+  const n = name ? name.toLowerCase().split(/\s+/)[0] : "";
+  if (n) {
+    if (MALE_A.has(n) || (/(o|os|r|l|z|el)$/.test(n) && !FEMALE_O.has(n))) return "M";
+    if (/[aey]$/.test(n) || FEMALE_O.has(n)) return "F";
+  }
+  return "?";
+}
+export function analyzeNarrators(book) {
+  const per = {};
   book.segments.forEach((s, i) => {
     if (s.heading) return;
     const t = s.text.split("\n\n").filter((p) => !/^\s*[—–]/.test(p)).join("\n");
-    const v = { F: (t.match(FIXED_F) || []).length, M: (t.match(FIXED_M) || []).length, fp: (t.match(FIRST_PERSON) || []).length, w: t.split(/\s+/).length };
-    for (const m of t.matchAll(NARR_ADJ)) v[m[2].startsWith("a") ? "F" : "M"]++;
-    const c = (per[chapterOf(i)] ||= { F: 0, M: 0, fp: 0, w: 0 });
-    for (const k in v) { c[k] += v[k]; tot[k] += v[k]; }
+    const v = { F: (t.match(FIXED_F) || []).length, M: (t.match(FIXED_M) || []).length, fp: (t.match(FIRST_PERSON) || []).length, w: t.split(/\s+/).filter(Boolean).length };
+    for (const m of t.matchAll(NARR_ADJ)) v[m[2].toLowerCase().startsWith("a") ? "F" : "M"]++;
+    add(per[chapterOf(book, i)] ||= zero(), v);
   });
-  const verdict = (v) => { const first = v.w > 0 && v.fp / v.w > 0.025; return { person: first ? 1 : 3, gender: first ? (v.F > v.M ? "F" : v.M > v.F ? "M" : "?") : "?" }; };
-  const bookV = verdict(tot), chapters = {};
-  for (const [ch, v] of Object.entries(per)) {
-    const cv = verdict(v);
-    if (v.w > 150 && cv.person === 1 && Math.abs(v.F - v.M) >= 2 && cv.gender !== bookV.gender) chapters[ch] = cv.gender;
+  const names = {}, counts = {};
+  book.chapters.forEach((c, k) => {
+    const rest = (c.title || "").replace(TITLE_PREFIX, "").trim();
+    if (PERSON_NAME.test(rest) && !NOT_NAMES.has(rest.toLowerCase())) { names[k] = rest; counts[rest] = (counts[rest] || 0) + 1; }
+  });
+  const pov = Object.entries(names).filter(([, n]) => counts[n] >= 2);
+  const narrators = {}, byChapter = {};
+  if (new Set(pov.map(([, n]) => n)).size >= 2) {
+    for (const [k, n] of pov) {
+      const id = n.toLowerCase();
+      const d = narrators[id] ||= { id, name: n, chapters: [], _v: zero() };
+      d.chapters.push(+k); add(d._v, per[k] || zero()); byChapter[k] = id;
+    }
+    for (const d of Object.values(narrators)) { d.gender = gender(d._v, d.name); delete d._v; }
+  } else {
+    const total = Object.values(per).reduce(add, zero());
+    const first = total.w > 0 && total.fp / total.w > 0.025;
+    const base = first ? gender(total) : "?";
+    book.chapters.forEach((c, k) => {
+      const v = per[k] || zero();
+      let g = base;
+      if (first && v.w > 150 && Math.abs(v.F - v.M) >= 2) g = v.F > v.M ? "F" : "M";
+      const id = g === "F" ? "narradora" : "narrador";
+      const d = narrators[id] ||= { id, name: id === "narradora" ? "Narradora" : "Narrador", gender: g === "F" || g === "M" ? g : "?", chapters: [] };
+      d.chapters.push(k); byChapter[k] = id;
+    });
   }
-  return { book: bookV, chapters, chapterOf };
+  return { narrators: Object.values(narrators).sort((a, b) => b.chapters.length - a.chapters.length), by_chapter: byChapter };
 }

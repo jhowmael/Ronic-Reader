@@ -45,7 +45,7 @@
 
 * **An open book.** Each sheet is a page of the PDF (EPUB books are split into book-sized pages), with a 3D page turn. **Click or tap any paragraph** and reading starts there; the current paragraph is highlighted and pages turn on their own.
 * **Natural voices, Brazilian accent.** Online neural voices (Francisca, Thalita, Antônio and multilingual voices) and 11 **offline** Kokoro voices that run on your device. The offline voices were tuned and chosen by measuring their Brazilian accent with a phoneme recognizer (`voice-lab/sotaque.py`). Each voice shows its region in the list.
-* **Narration by character.** Detects whether the book is narrated in the first person by a man or a woman (also chapter by chapter) and reads it with a narrator or narrator voice; you can force either and pick both voices.
+* **Narration by context.** One switch: the app finds how many narrators the book has (point-of-view chapters such as "3 — Briana", or a first-person narrator by gender) and reads each chapter with that narrator's voice. Pick a voice per narrator.
 * **Instant controls.** Speech speed from 0.5× to 2.5× without regenerating audio, voice switching that starts in about a second, focus mode that enlarges the book when the side panels are closed.
 * **Library.** Covers, search, reading position per book, rename, change the cover (an image or a page of the PDF).
 * **Clean text.** Removes repeated headers and footers, page numbers ("Página 4 de 15"), hyphenation and line breaks; finds chapters from the PDF outline, "Capítulo" headings or numbered sections, and a title from the cover when the file name says nothing.

@@ -62,19 +62,35 @@ def test_catalog_engines_and_genders():
     assert voices.find("pt-BR-ThalitaMultilingualNeural")
 
 
-# ------------------------------------------------- narração por personagem
-def test_narrator_gender_detection():
-    from ronic_reader.narration import analyze, narrator_voices, voice_for
+# ------------------------------------------------- narração por contexto
+def _book(chapters):
     from ronic_reader.player import Book, Chapter, Segment
 
-    segs = [Segment(1, "Eu estava cansada naquela noite e eu mesma abri a janela do meu quarto para ver a minha rua.")] * 6
-    book = Book("t", "t", "t", 1, segs, [Chapter("Início", 0)])
+    segs, chs = [], []
+    for title, text in chapters:
+        chs.append(Chapter(title, len(segs)))
+        segs.append(Segment(1, title, heading=True))
+        segs += [Segment(1, text)] * 4
+    return Book("t", "t", "t", 1, segs, chs)
+
+
+def test_pov_narrators_from_chapter_titles():
+    from ronic_reader.narration import analyze, narrator_voices, voice_for
+
+    book = _book([("1 Briana", "Eu estava cansada e eu mesma abri a porta do meu quarto."),
+                  ("2 Jacob", "Eu estava cansado e eu mesmo fechei a minha janela."),
+                  ("3 Briana", "Eu mesma não sabia o que fazer da minha vida."),
+                  ("4 Jacob", "Eu mesmo achei graça do meu jeito.")])
     a = analyze(book)
-    assert a["book"] == {"person": 1, "gender": "F"}
-    data = {"enabled": True, "voices": {}, "gender": "auto", "analysis": a}
-    main = "pt-BR-AntonioNeural"
-    v = voice_for(data, book, 0, "edge", main)
-    assert voices.gender_of(v) == "F"  # narradora com voz feminina
-    data["enabled"] = False
-    assert voice_for(data, book, 0, "edge", main) is None
-    assert narrator_voices(data, "edge", main)["M"] == main
+    assert {(n["name"], n["gender"]) for n in a["narrators"]} == {("Briana", "F"), ("Jacob", "M")}
+    data = {"enabled": True, "voices": {}, "analysis": a}
+    vs = narrator_voices(data, "edge", "pt-BR-AntonioNeural")
+    assert voices.gender_of(vs["briana"]) == "F" and vs["jacob"] == "pt-BR-AntonioNeural"
+    assert voices.gender_of(voice_for(data, book, 1, "edge", "pt-BR-AntonioNeural")) == "F"
+
+
+def test_first_person_single_narrator():
+    from ronic_reader.narration import analyze
+
+    a = analyze(_book([("Início", "Eu estava cansada naquela noite e eu mesma abri a janela do meu quarto.")]))
+    assert [(n["id"], n["gender"]) for n in a["narrators"]] == [("narradora", "F")]

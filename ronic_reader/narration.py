@@ -1,13 +1,12 @@
-"""Narração por personagem: o livro é lido com voz de narrador ou de narradora,
-conforme quem narra cada trecho.
+"""Narração por contexto: descobre quantos narradores o livro tem e lê cada trecho
+com a voz do narrador daquele capítulo.
 
-Só regras de português, sem IA (instantâneo e leve):
-- 1ª pessoa: muitos "eu/me/meu/minha" na narração;
-- gênero de quem narra pela concordância: "eu estava cansada", "eu mesma",
-  "obrigado", "sozinho";
-- capítulo a capítulo, para livros com mais de um narrador.
-
-As escolhas (ligado/desligado, vozes, gênero forçado) ficam salvas por livro.
+Só regras (instantâneo, sem IA):
+1. Capítulos de ponto de vista: títulos com nome de personagem que se repetem
+   ("3 — Briana", "Jacob") viram narradores com esse nome.
+2. Senão, narração em 1ª pessoa com gênero pela concordância ("eu estava cansada",
+   "obrigado"), capítulo a capítulo: Narrador e/ou Narradora.
+3. Senão (3ª pessoa), um narrador só.
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ import hashlib
 import json
 import re
 import threading
+from collections import Counter
 from pathlib import Path
 
 from . import voices as catalog
@@ -25,48 +25,85 @@ NARRATOR_ADJ = re.compile(
     r"\beu\s+(?:estava|estou|era|sou|fui|fiquei|ficara|ficava|andava|vivia|me\s+sentia|me\s+senti|"
     r"me\s+achava|me\s+achei|parecia|continuava|permaneci|seria|ficaria|estaria)\s+"
     r"(?:muito\s+|tão\s+|um\s+pouco\s+|meio\s+)?(?P<adj>[a-zà-ÿ]{4,}?)(?P<g>[oa]s?)\b", re.I)
-FIXED_F = re.compile(r"\b(?:eu mesma|obrigada|sozinha|eu própria|eu propria)\b", re.I)
-FIXED_M = re.compile(r"\b(?:eu mesmo|obrigado|sozinho|eu próprio|eu proprio)\b", re.I)
-DIALOGUE = re.compile(r"^\s*[—–]")  # falas não contam: o "eu" ali é de quem fala
+FIXED_F = re.compile(r"\b(?:eu mesma|obrigada|sozinha|eu própria)\b", re.I)
+FIXED_M = re.compile(r"\b(?:eu mesmo|obrigado|sozinho|eu próprio)\b", re.I)
+DIALOGUE = re.compile(r"^\s*[—–]")
+TITLE_PREFIX = re.compile(r"^\s*(?:cap[íi]tulo|parte|chapter)?\s*(?:\d+|[IVXLCDM]+)?\s*[-–—:.·|]*\s*", re.I)
+PERSON_NAME = re.compile(r"^[A-ZÀ-Ý][a-zà-ÿ]+(?:\s+[A-ZÀ-Ý][a-zà-ÿ]+)?$")
+MALE_A = {"luca", "joshua", "elias", "jonas", "nicolas", "lucas", "thomas", "tomas", "andreas", "mattias"}
+FEMALE_O = {"rocio", "consuelo", "socorro", "amparo"}
 
 
-def _votes(text: str) -> dict:
-    f = len(FIXED_F.findall(text)) + sum(1 for m in NARRATOR_ADJ.finditer(text) if m.group("g").startswith("a"))
-    m = len(FIXED_M.findall(text)) + sum(1 for m in NARRATOR_ADJ.finditer(text) if m.group("g").startswith("o"))
-    return {"F": f, "M": m, "fp": len(FIRST_PERSON.findall(text)), "w": len(text.split())}
+def _votes(text: str) -> Counter:
+    v = Counter(F=len(FIXED_F.findall(text)), M=len(FIXED_M.findall(text)),
+                fp=len(FIRST_PERSON.findall(text)), w=len(text.split()))
+    for m in NARRATOR_ADJ.finditer(text):
+        v["F" if m.group("g").startswith("a") else "M"] += 1
+    return v
+
+
+def _gender(v: Counter, name: str = "") -> str:
+    if v["F"] != v["M"]:
+        return "F" if v["F"] > v["M"] else "M"
+    n = name.lower().split()[0] if name else ""
+    if n:
+        if n in MALE_A or n.endswith(("o", "os", "r", "l", "z", "el")) and n not in FEMALE_O:
+            return "M"
+        if n.endswith(("a", "e", "y")) or n in FEMALE_O:
+            return "F"
+    return "?"
 
 
 def analyze(book) -> dict:
-    """Narrador do livro e de cada capítulo (só a narração, sem as falas)."""
-    total = {"F": 0, "M": 0, "fp": 0, "w": 0}
-    chapters: dict[int, dict] = {}
+    """{"narrators": [{id, name, gender, chapters}], "by_chapter": {cap: id}}"""
+    per: dict[int, Counter] = {}
     for idx, seg in enumerate(book.segments):
         if seg.heading:
             continue
         narration = "\n".join(p for p in seg.text.split("\n\n") if not DIALOGUE.match(p))
-        v = _votes(narration)
-        ch = chapters.setdefault(book.chapter_of(idx), {"F": 0, "M": 0, "fp": 0, "w": 0})
-        for k in v:
-            ch[k] += v[k]
-            total[k] += v[k]
+        per.setdefault(book.chapter_of(idx), Counter()).update(_votes(narration))
 
-    def verdict(v: dict) -> dict:
-        first = v["w"] > 0 and v["fp"] / v["w"] > 0.025
-        g = "F" if v["F"] > v["M"] else "M" if v["M"] > v["F"] else "?"
-        return {"person": 1 if first else 3, "gender": g if first else "?"}
-
-    book_v = verdict(total)
-    other = {}
-    for ch, v in chapters.items():
-        cv = verdict(v)
-        # só muda quando a evidência no capítulo é clara
-        if v["w"] > 150 and cv["person"] == 1 and abs(v["F"] - v["M"]) >= 2 and cv["gender"] != book_v["gender"]:
-            other[ch] = cv["gender"]
-    return {"book": book_v, "chapters": other}
+    # 1) capítulos de ponto de vista: nome de personagem repetido no título
+    names = {}
+    for k, ch in enumerate(book.chapters):
+        rest = TITLE_PREFIX.sub("", ch.title or "").strip()
+        if PERSON_NAME.match(rest) and rest.lower() not in ("início", "prólogo", "epílogo", "fim", "sobre"):
+            names[k] = rest
+    counts = Counter(names.values())
+    pov = {k: n for k, n in names.items() if counts[n] >= 2}
+    narrators: dict[str, dict] = {}
+    by_chapter: dict[int, str] = {}
+    if len(set(pov.values())) >= 2:
+        for k, n in pov.items():
+            nid = n.lower()
+            d = narrators.setdefault(nid, {"id": nid, "name": n, "chapters": [], "_v": Counter()})
+            d["chapters"].append(k)
+            d["_v"].update(per.get(k, Counter()))
+            by_chapter[k] = nid
+        for d in narrators.values():
+            d["gender"] = _gender(d.pop("_v"), d["name"])
+    else:
+        # 2) 1ª pessoa: narrador/narradora por capítulo
+        total = sum(per.values(), Counter())
+        first = total["w"] and total["fp"] / total["w"] > 0.025
+        base = _gender(total) if first else "?"
+        for k in range(len(book.chapters)):
+            v = per.get(k, Counter())
+            g = base
+            if first and v["w"] > 150 and abs(v["F"] - v["M"]) >= 2:
+                g = "F" if v["F"] > v["M"] else "M"
+            nid = {"F": "narradora", "M": "narrador"}.get(g, "narrador")
+            d = narrators.setdefault(nid, {"id": nid, "name": "Narradora" if nid == "narradora" else "Narrador",
+                                           "gender": g if g in ("F", "M") else "?", "chapters": []})
+            d["chapters"].append(k)
+            by_chapter[k] = nid
+    out = sorted(narrators.values(), key=lambda d: -len(d["chapters"]))
+    return {"narrators": out, "by_chapter": {str(k): v for k, v in by_chapter.items()}}
 
 
 class NarrationStore:
-    DEFAULT = {"enabled": False, "voices": {}, "gender": "auto"}
+    DEFAULT = {"enabled": False, "voices": {}}
+    VERSION = 2
 
     def __init__(self, folder: Path) -> None:
         self.folder = folder
@@ -83,12 +120,15 @@ class NarrationStore:
                     data = json.loads(self._path(book.id).read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     data = {}
+                if data.get("version") != self.VERSION:
+                    data = {"enabled": data.get("enabled", False), "voices": {}}
                 for k, v in self.DEFAULT.items():
                     data.setdefault(k, v if not isinstance(v, dict) else dict(v))
                 self._cache[book.id] = data
             data = self._cache[book.id]
-        if "analysis" not in data:  # análise rápida (regras), feita uma vez por livro
+        if "analysis" not in data:
             data["analysis"] = analyze(book)
+            data["version"] = self.VERSION
             self.save(book.id)
         return data
 
@@ -106,47 +146,42 @@ class NarrationStore:
         data = self.load(book)
         if "enabled" in values:
             data["enabled"] = bool(values["enabled"])
-        if values.get("gender") in ("auto", "F", "M"):
-            data["gender"] = values["gender"]
-        for g in ("F", "M"):
-            v = (values.get("voices") or {}).get(g)
+        for nid, v in (values.get("voices") or {}).items():
             if v:
-                data["voices"][f"{engine}:{g}"] = v
+                data["voices"][f"{engine}:{nid}"] = v
         self.save(book.id)
         return data
 
 
 def narrator_voices(data: dict, engine: str, main_voice: str) -> dict:
-    """Voz de narrador (M) e de narradora (F) para o motor atual."""
-    out = {}
+    """Voz de cada narrador: escolha da pessoa, senão sugestão por gênero (sem repetir)."""
+    out, used = {}, set()
     main_g = catalog.gender_of(main_voice)
-    for g in ("F", "M"):
-        chosen = data["voices"].get(f"{engine}:{g}")
+    for n in data["analysis"]["narrators"]:
+        chosen = data["voices"].get(f"{engine}:{n['id']}")
         if chosen and (catalog.find(chosen) or {}).get("engine") == engine:
-            out[g] = chosen
-        elif main_g == g:
-            out[g] = main_voice
+            out[n["id"]] = chosen
+        elif main_voice not in used and n["gender"] in (main_g, "?"):
+            out[n["id"]] = main_voice
         else:
-            out[g] = next(iter(catalog.pool(engine, g)), main_voice)
+            pool = catalog.pool(engine, n["gender"]) if n["gender"] in ("F", "M") else []
+            out[n["id"]] = next((v for v in pool if v not in used and v != main_voice), pool[0] if pool else main_voice)
+        used.add(out[n["id"]])
     return out
 
 
 def voice_for(data: dict, book, idx: int, engine: str, main_voice: str) -> str | None:
-    """Voz do trecho, ou None para a voz principal."""
     if not data.get("enabled"):
         return None
-    a = data["analysis"]
-    g = data.get("gender", "auto")
-    if g == "auto":
-        g = a["chapters"].get(str(book.chapter_of(idx)), a["chapters"].get(book.chapter_of(idx), a["book"]["gender"]))
-    if g not in ("F", "M"):
+    nid = data["analysis"]["by_chapter"].get(str(book.chapter_of(idx)))
+    if not nid:
         return None
-    v = narrator_voices(data, engine, main_voice)[g]
-    return None if v == main_voice else v
+    v = narrator_voices(data, engine, main_voice).get(nid)
+    return None if not v or v == main_voice else v
 
 
 def variant(data: dict, engine: str, main_voice: str) -> str:
     if not data.get("enabled"):
         return ""
-    blob = json.dumps([data.get("gender"), data["analysis"], narrator_voices(data, engine, main_voice)], sort_keys=True)
+    blob = json.dumps([data["analysis"]["by_chapter"], narrator_voices(data, engine, main_voice)], sort_keys=True)
     return "-n" + hashlib.sha1(blob.encode()).hexdigest()[:8]

@@ -8,6 +8,8 @@ const SR = 24000, SENTENCE_PAUSE = 0.18, PARAGRAPH_PAUSE = 0.45;
 
 importScripts(PIPER + ".js", ORT + "ort.webgpu.min.js");
 ort.env.wasm.wasmPaths = ORT;
+// com isolamento (cabeçalhos do sw.js) o modelo roda em várias threads: 2-4x mais rápido
+if (self.crossOriginIsolated) ort.env.wasm.numThreads = Math.max(1, Math.min(4, (self.navigator.hardwareConcurrency || 2) - 1));
 
 let vocab = null, session = null, device = "wasm";
 const styles = new Map();
@@ -18,10 +20,18 @@ async function init(vocabUrl) {
   postMessage({ type: "status", text: "Baixando a voz (cerca de 90 MB, só na primeira vez)…" });
   const model = await (await fetch(HF + "onnx/model_quantized.onnx")).arrayBuffer();
   postMessage({ type: "status", text: "Carregando a voz…" });
-  const eps = ("gpu" in self.navigator) ? [["webgpu", "wasm"], ["wasm"]] : [["wasm"]];
-  for (const ep of eps) {
-    try { session = await ort.InferenceSession.create(model, { executionProviders: ep }); device = ep[0]; break; }
-    catch (e) { session = null; }
+  // GPU, senão CPU com threads, senão CPU simples; cada tentativa tem prazo para nunca travar
+  const tries = [];
+  if ("gpu" in self.navigator) tries.push(["webgpu", 0]);
+  if (self.crossOriginIsolated) tries.push(["wasm", ort.env.wasm.numThreads]);
+  tries.push(["wasm", 1]);
+  for (const [ep, threads] of tries) {
+    if (threads) ort.env.wasm.numThreads = threads;
+    try {
+      session = await Promise.race([ort.InferenceSession.create(model, { executionProviders: [ep] }),
+        new Promise((_, no) => setTimeout(() => no(new Error("prazo")), 30000))]);
+      device = ep; break;
+    } catch (e) { session = null; }
   }
   if (!session) throw new Error("Não foi possível carregar a voz neste aparelho.");
   postMessage({ type: "ready", device });
@@ -104,35 +114,42 @@ function wav(chunks) {
   return buf;
 }
 
-// fila: pedidos de play (prioridade) passam na frente da pré-geração
+// fila: cada pedido vira parágrafos; entre um parágrafo e outro, pedidos mais urgentes
+// (a 1ª frase de um play) passam na frente da pré-geração que já começou.
 const queue = []; let busy = false;
+function units(job) {
+  const out = [];
+  for (const part of job.parts) for (const para of part.text.split("\n\n")) if (para.trim()) out.push({ voice: part.voice, text: para.trim() });
+  return out;
+}
 async function pump() {
   if (busy || !queue.length) return;
   busy = true;
-  queue.sort((a, b) => b.priority - a.priority);
-  const job = queue.shift();
+  queue.sort((a, b) => b.priority - a.priority || a.id - b.id);
+  const job = queue[0];
   try {
     await init(job.vocab);
-    const chunks = [];
-    for (const part of job.parts) {
-      const style = await styleFor(part.voice);
-      for (const para of part.text.split("\n\n")) {
-        if (!para.trim()) continue;
-        const ph = ptbr(await phonemize(para.trim()));
-        for (const s of phonemeSentences(ph)) {
-          chunks.push(Float32Array.from(await speakPhonemes(s, style, job.speed), (x) => x * job.gain));
-          chunks.push(new Float32Array(Math.round(SR * SENTENCE_PAUSE)));
-        }
-        chunks.push(new Float32Array(Math.round(SR * (PARAGRAPH_PAUSE - SENTENCE_PAUSE))));
+    job.units ||= units(job); job.chunks ||= [];
+    const u = job.units.shift();
+    if (u) {
+      const style = await styleFor(u.voice);
+      for (const s of phonemeSentences(ptbr(await phonemize(u.text)))) {
+        job.chunks.push(Float32Array.from(await speakPhonemes(s, style, job.speed), (x) => x * job.gain));
+        job.chunks.push(new Float32Array(Math.round(SR * SENTENCE_PAUSE)));
       }
+      job.chunks.push(new Float32Array(Math.round(SR * (PARAGRAPH_PAUSE - SENTENCE_PAUSE))));
     }
-    const data = wav(chunks);
-    postMessage({ type: "done", id: job.id, wav: data }, [data]);
+    if (!job.units.length) {
+      queue.splice(queue.indexOf(job), 1);
+      const data = wav(job.chunks);
+      postMessage({ type: "done", id: job.id, wav: data }, [data]);
+    }
   } catch (e) {
+    const k = queue.indexOf(job); if (k >= 0) queue.splice(k, 1);
     postMessage({ type: "error", id: job.id, message: String(e && e.message || e) });
   }
   busy = false;
-  pump();
+  setTimeout(pump, 0);
 }
 
 onmessage = (e) => {

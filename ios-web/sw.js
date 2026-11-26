@@ -1,12 +1,24 @@
 // Ronic Reader (iPad/iPhone): funciona offline depois da primeira visita.
 // App: busca na rede primeiro (para receber atualizações) e cai no cache sem internet.
 // Bibliotecas e modelo de voz (CDN e Hugging Face): cache primeiro (não mudam).
-const APP = "ronic-app-v1", ASSETS = "ronic-assets-v1";
+const APP = "ronic-app-v2", ASSETS = "ronic-assets-v1";
+// Isolamento de origem (COOP/COEP): o GitHub Pages não deixa mandar esses cabeçalhos,
+// então o service worker os acrescenta. Com isso a voz pode usar várias threads.
+function isolate(res) {
+  if (!res || res.status === 0 || res.type === "opaqueredirect") return res;
+  const h = new Headers(res.headers);
+  h.set("Cross-Origin-Opener-Policy", "same-origin");
+  h.set("Cross-Origin-Embedder-Policy", "require-corp");
+  h.set("Cross-Origin-Resource-Policy", "same-origin");
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+}
 const SHELL = ["./", "index.html", "backend.js", "manifest.webmanifest", "engine/text.js", "engine/formats.js",
   "engine/store.js", "engine/tts-worker.js", "engine/voices.json", "engine/vocab.json", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(APP).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
-self.addEventListener("activate", (e) => { e.waitUntil(self.clients.claim()); });
+self.addEventListener("activate", (e) => {
+  e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== APP && k !== ASSETS).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+});
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET") return;
@@ -22,7 +34,7 @@ self.addEventListener("fetch", (e) => {
   } else if (url.origin === location.origin) {
     e.respondWith(fetch(e.request).then((res) => {
       if (res.ok) { const copy = res.clone(); caches.open(APP).then((c) => c.put(e.request, copy)); }
-      return res;
-    }).catch(() => caches.match(e.request, { ignoreSearch: true })));
+      return isolate(res);
+    }).catch(() => caches.match(e.request, { ignoreSearch: true }).then(isolate)));
   }
 });

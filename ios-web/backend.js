@@ -8,7 +8,8 @@
   const mods = {};
   const load = (name) => (mods[name] ||= import(ENGINE + name + ".js"));
   let catalog = null;
-  const voicesJson = () => (catalog ||= fetch(ENGINE + "voices.json").then((r) => r.json()));
+  const voicesJson = () => (catalog ||= fetch(ENGINE + "voices.json").then((r) => r.json())
+    .then((list) => list.map((v) => ({ ...v, group: (v.group || "").replace("no seu Mac", "no aparelho") }))));
 
   // ----------------------------------------------------------------- utilidades
   const PRESETS = [
@@ -64,32 +65,36 @@
     return promise;
   }
 
-  // ------------------------------------------------- narração por personagem
+  // ------------------------------------------------- narração por contexto
   async function narrationData(book) {
     const d = await kv("narration:" + book.id, null);
-    if (d) return d;
-    const { analyzeNarrator } = await load("text");
-    const a = analyzeNarrator(book);
-    return setKv("narration:" + book.id, { enabled: false, gender: "auto", voices: {}, analysis: { book: a.book, chapters: a.chapters } });
+    if (d && d.version === 2) return d;
+    const { analyzeNarrators } = await load("text");
+    return setKv("narration:" + book.id, { version: 2, enabled: !!d?.enabled, voices: {}, analysis: analyzeNarrators(book) });
   }
+  // voz de cada narrador: escolha da pessoa, senão a principal (mesmo gênero), senão outra do gênero sem repetir
   async function narratorVoices(d, main) {
     const cat = (await voicesJson()).filter((v) => v.engine === "kokoro");
     const mainG = cat.find((v) => v.id === main)?.gender;
-    const out = {};
-    for (const g of ["F", "M"]) {
-      const chosen = d.voices["kokoro:" + g];
-      out[g] = chosen && cat.some((v) => v.id === chosen) ? chosen : mainG === g ? main : (cat.find((v) => v.gender === g)?.id || main);
+    const out = {}, used = new Set();
+    for (const n of d.analysis.narrators) {
+      const chosen = d.voices[n.id];
+      if (chosen && cat.some((v) => v.id === chosen)) out[n.id] = chosen;
+      else if (!used.has(main) && (n.gender === mainG || n.gender === "?")) out[n.id] = main;
+      else {
+        const pool = cat.filter((v) => v.gender === n.gender).map((v) => v.id);
+        out[n.id] = pool.find((v) => !used.has(v) && v !== main) || pool[0] || main;
+      }
+      used.add(out[n.id]);
     }
     return out;
   }
-  function chapterOf(book, i) { let n = 0; book.chapters.forEach((c, k) => { if (c.segment <= i) n = k; }); return n; }
   async function voiceFor(book, i, s) {
     const d = await narrationData(book);
     if (!d.enabled) return s.voice;
-    let g = d.gender;
-    if (g === "auto") g = d.analysis.chapters[chapterOf(book, i)] || d.analysis.book.gender;
-    if (g !== "F" && g !== "M") return s.voice;
-    return (await narratorVoices(d, s.voice))[g];
+    const { chapterOf } = await load("text");
+    const id = d.analysis.by_chapter[chapterOf(book, i)];
+    return (id && (await narratorVoices(d, s.voice))[id]) || s.voice;
   }
 
   // ------------------------------------------------------------- biblioteca
@@ -195,9 +200,8 @@
       const book = books.get(json.id); if (!book) throw new Error("Abra o livro primeiro.");
       const d = await narrationData(book);
       if ("enabled" in json) d.enabled = !!json.enabled;
-      if (["auto", "F", "M"].includes(json.gender)) d.gender = json.gender;
-      for (const g of ["F", "M"]) if (json.voices?.[g]) d.voices["kokoro:" + g] = json.voices[g];
-      await setKv("narration:" + book.id, d); audioCache.clear();
+      for (const [id, v] of Object.entries(json.voices || {})) if (v) d.voices[id] = v;
+      await setKv("narration:" + book.id, d);
       return narrationState(book);
     }
     if (p === "/api/prepare_voice" || p === "/api/reveal") return { ok: true };
@@ -205,7 +209,7 @@
   }
   async function narrationState(book) {
     const s = await settings(), d = await narrationData(book);
-    return { enabled: d.enabled, gender: d.gender, analysis: d.analysis, voices: await narratorVoices(d, s.voice),
+    return { enabled: d.enabled, narrators: d.analysis.narrators, voices: await narratorVoices(d, s.voice),
       pool: (await voicesJson()).filter((v) => v.engine === "kokoro") };
   }
 
@@ -238,5 +242,10 @@
   window.RonicBackend.onStatus = (text) => { const s = document.getElementById("status"); if (s) s.textContent = text || ""; };
 
   // modo offline: guarda o app e a voz no aparelho
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  // na 1ª visita a página ainda não passou pelo service worker: recarrega uma vez para ficar isolada
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").then(() => navigator.serviceWorker.ready).then(() => {
+    if (!window.crossOriginIsolated && !sessionStorage.getItem("ronic-coi")) {
+      sessionStorage.setItem("ronic-coi", "1"); location.reload();
+    }
+  }).catch(() => {});
 })();

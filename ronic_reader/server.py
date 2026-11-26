@@ -70,8 +70,7 @@ class App:
     def narration_state(self, book) -> dict:
         engine, main = self._main_voice()
         data = self.narration.load(book)
-        a = data["analysis"]
-        return {"enabled": data["enabled"], "gender": data["gender"], "analysis": a,
+        return {"enabled": data["enabled"], "narrators": data["analysis"]["narrators"],
                 "voices": narr.narrator_voices(data, engine, main),
                 "pool": [v for v in catalog.catalog() if v["engine"] == engine]}
 
