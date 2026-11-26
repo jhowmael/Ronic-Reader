@@ -278,7 +278,7 @@ ROMAN_OR_NUMBER = re.compile(r"^(?:[IVXLCDM]{1,7}|\d{1,4})\.?$")
 
 
 def load_epub(path: Path) -> Book:
-    """EPUB -> livro em páginas virtuais, com os capítulos do próprio sumário."""
+    """EPUB -> livro com uma página por capítulo (texto corrido), com os capítulos do sumário."""
     from .epub import Block, paginate, read_epub
 
     eb = read_epub(path)
@@ -309,7 +309,8 @@ def load_epub(path: Path) -> Book:
             buf = ""
 
     last_page = 1
-    for page, block, ci in paginate(eb):
+    # cada capítulo é uma página só (o texto corre, sem paginação inventada)
+    for page, block, ci in paginate(eb, page_chars=10**9):
         last_page = page
         if ci != current:
             flush()

@@ -19,24 +19,19 @@ export async function readPdf(bytes) {
   for (let n = 1; n <= doc.numPages; n++) {
     const page = await doc.getPage(n);
     const tc = await page.getTextContent();
-    // linhas pela posição vertical; espaço maior entre linhas = parágrafo novo
-    const lines = []; let cur = "", lastY = null, gaps = [];
+    // linhas pela posição vertical. Os parágrafos ficam por conta de text.js (fim de frase + linha
+    // curta), igual ao app do Mac: linha em branco aqui quebraria cada linha num parágrafo.
+    const out = []; let cur = "", lastY = null;
+    const flush = () => { if (cur.trim()) out.push(cur); cur = ""; };
     for (const it of tc.items) {
       if (!("str" in it)) continue;
       const y = it.transform[5];
-      if (lastY !== null && Math.abs(y - lastY) > 2 && cur) { lines.push({ text: cur, y: lastY }); cur = ""; }
+      if (lastY !== null && Math.abs(y - lastY) > 2) flush();
       cur += it.str;
-      if (it.hasEOL) { lines.push({ text: cur, y }); cur = ""; lastY = null; continue; }
       lastY = y;
+      if (it.hasEOL) { flush(); lastY = null; }
     }
-    if (cur) lines.push({ text: cur, y: lastY });
-    for (let i = 1; i < lines.length; i++) gaps.push(Math.abs(lines[i - 1].y - lines[i].y));
-    const typical = gaps.length ? gaps.slice().sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : 0;
-    const out = [];
-    lines.forEach((l, i) => {
-      if (i && typical && Math.abs(lines[i - 1].y - l.y) > typical * 1.6) out.push("");
-      out.push(l.text);
-    });
+    flush();
     pages.push({ number: n, text: out.join("\n") });
     page.cleanup();
   }
@@ -146,6 +141,18 @@ export async function readEpub(bytes) {
       const href = a.getAttribute("href"); if (!href) continue;
       const p = resolvePath(dirOf(nav.path), href); const t = a.textContent.replace(/\s+/g, " ").trim();
       if (t && !toc[p]) toc[p] = t;
+    }
+  }
+  // EPUB 2: sumário no toc.ncx
+  const ncx = Object.values(manifest).find((m) => m.media.includes("dtbncx"));
+  if (!Object.keys(toc).length && ncx && zip.file(ncx.path)) {
+    const d = new DOMParser().parseFromString(await zip.file(ncx.path).async("string"), "application/xml");
+    for (const np of d.getElementsByTagNameNS("*", "navPoint")) {
+      const src = np.getElementsByTagNameNS("*", "content")[0]?.getAttribute("src");
+      const t = (np.getElementsByTagNameNS("*", "text")[0]?.textContent || "").replace(/\s+/g, " ").trim();
+      if (!src || !t) continue;
+      const p = resolvePath(dirOf(ncx.path), src);
+      if (!toc[p]) toc[p] = t;
     }
   }
   // capa

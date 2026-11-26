@@ -486,6 +486,10 @@ body.dragging #dropOverlay { display: grid; }
 /* ---------- iPhone e janelas estreitas ---------- */
 html.web body { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
 .web-hidden { display: none !important; }
+html:not(.web) .web-only { display: none !important; }
+/* EPUB: texto corrido, uma página por capítulo, com rolagem */
+#book.flowing .page-body { overflow-y: auto; }
+#book.flowing .page-body .flow { padding: 8px 0 40px; }
 html.web #toolbar { padding-top: env(safe-area-inset-top); height: calc(52px + env(safe-area-inset-top)); }
 html.web #player { bottom: calc(16px + env(safe-area-inset-bottom)); }
 html.web #app.no-sidebar #toolbar { padding-left: 12px; }
@@ -527,6 +531,8 @@ html.web #app.no-sidebar #toolbar { padding-left: 12px; }
     <symbol id="i-right" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></symbol>
+    <symbol id="i-shrink" viewBox="0 0 24 24"><path d="M9 4v3.5A1.5 1.5 0 0 1 7.5 9H4M20 9h-3.5A1.5 1.5 0 0 1 15 7.5V4M15 20v-3.5a1.5 1.5 0 0 1 1.5-1.5H20M4 15h3.5A1.5 1.5 0 0 1 9 16.5V20"/></symbol>
     <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="18" cy="12" r="1.4" fill="currentColor"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></symbol>
     <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4.5 19.5 5.6 15 15.8 4.8a1.8 1.8 0 0 1 2.5 0l.9.9a1.8 1.8 0 0 1 0 2.5L9 18.4z"/><path d="m13.8 6.8 3.4 3.4"/></symbol>
@@ -565,6 +571,7 @@ html.web #app.no-sidebar #toolbar { padding-left: 12px; }
         <button class="icon-btn" id="openBtn" title="Abrir PDF ou EPUB (⌘O)" aria-label="Abrir livro"><svg class="ico"><use href="#i-open"/></svg></button>
         <button class="icon-btn" id="exportBtn" title="Salvar o livro em MP3" aria-label="Salvar em MP3" hidden><span class="ring"></span><svg class="ico"><use href="#i-export"/></svg></button>
         <button class="icon-btn" id="voiceBtn" title="Narrador (⌘⇧V)" aria-label="Narrador"><svg class="ico"><use href="#i-voice"/></svg></button>
+        <button class="icon-btn web-only" id="fullBtn" title="Tela cheia (a tela não apaga)" aria-label="Tela cheia"><svg class="ico"><use href="#i-expand" id="fullUse"/></svg></button>
         <button class="icon-btn" id="appearanceBtn" title="Aparência" aria-label="Aparência"><svg class="ico"><use href="#i-appearance"/></svg></button>
       </div>
     </header>
@@ -996,7 +1003,10 @@ function layout(force = false) {
   single = ph * aspect < 300 || phSingle > ph * 1.35;
   if (single) ph = phSingle;
   ph = Math.max(ph, 240);
-  const pw = ph * aspect;
+  let pw = ph * aspect;
+  const flowing = book.format === "epub";
+  if (flowing) { single = true; ph = Math.max(240, availH); pw = Math.min(availW, Math.max(ph * 0.72, Math.min(760, availW))); }
+  $("book").classList.toggle("flowing", flowing);
   const el = $("book");
   el.style.setProperty("--pw", pw + "px"); el.style.setProperty("--ph", ph + "px"); el.style.setProperty("--cols", single ? 1 : 2);
   const st = $("stage").style;
@@ -1075,6 +1085,10 @@ function fitPage(page) {
   const body = page.querySelector(".page-body"), flow = page.querySelector(".flow");
   if (!body || !flow) return;
   body.classList.remove("scroll");
+  if (book?.format === "epub") {   // texto corrido: letra confortável e fixa, a página rola
+    const size = Math.max(16, Math.min(21, page.offsetWidth * 0.034));
+    flow.style.fontSize = size + "px"; body.classList.add("scroll"); return size;
+  }
   const room = body.clientHeight - 6;
   const fits = () => flow.getBoundingClientRect().height <= room;
   const scale = document.body.classList.contains("focus") ? 0.037 : 0.0345;   // modo foco: letra maior
@@ -1155,8 +1169,9 @@ function updateChrome() {
   $("turnNext").disabled = view >= lastView();
   $("tbTitle").textContent = book.title || book.name;
   const label = book.chapters.length > 1 ? chapterLabel(book.chapters[chapterOfPage(p)]) : "";
-  const where = pages.length > 1 ? `Páginas ${pages[0]}–${pages[1]}` : pages.length ? `Página ${p}` : "Folha de rosto";
-  $("tbSub").textContent = `${label ? label + " · " : ""}${where} de ${book.total_pages}`;
+  const unit = book.format === "epub" ? "Capítulo" : "Página";
+  const where = pages.length > 1 ? `Páginas ${pages[0]}–${pages[1]}` : pages.length ? `${unit} ${p}` : "Folha de rosto";
+  $("tbSub").textContent = book.format === "epub" ? (label || `${where} de ${book.total_pages}`) : `${label ? label + " · " : ""}${where} de ${book.total_pages}`;
   document.querySelectorAll(".side-item.chapter").forEach(e => e.classList.toggle("current", +e.dataset.n === chapterOfPage(p)));
 }
 function renderChapters() {
@@ -1186,7 +1201,7 @@ function highlight(i) {
   const ch = book.chapters[chapterOfSeg(i)];
   $("chapterName").textContent = chapterLabel(ch);
   $("seek").value = seg.page; paintRange($("seek"));
-  $("pageInfo").textContent = `Página ${seg.page} de ${book.total_pages}`;
+  $("pageInfo").textContent = `${book.format === "epub" ? "Capítulo" : "Página"} ${seg.page} de ${book.total_pages}`;
   $("pctInfo").textContent = `${Math.round(i / Math.max(1, book.segments.length - 1) * 100)}%`;
   if ("mediaSession" in navigator && window.MediaMetadata) {
     try { navigator.mediaSession.metadata = new MediaMetadata({ title: chapterLabel(ch) || book.name, artist: currentVoice()?.label || "Ronic Reader", album: book.title || book.name }); } catch (e) {}
@@ -1506,6 +1521,35 @@ function toggleAppearance(force) {
 }
 
 $("sidebarBtn").onclick = () => toggleSidebar();
+
+// Tela cheia: enquanto estiver ativa, a tela do aparelho não apaga sozinha (Wake Lock)
+let wakeLock = null, fullOn = false;
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLock && "wakeLock" in navigator) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; }); }
+    if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (e) {}
+}
+document.addEventListener("visibilitychange", () => { if (fullOn && document.visibilityState === "visible") keepAwake(true); });
+function setFull(on) {
+  fullOn = on; document.body.classList.toggle("full", on);
+  $("fullUse").setAttribute("href", on ? "#i-shrink" : "#i-expand");
+  $("fullBtn").classList.toggle("on", on); $("fullBtn").title = on ? "Sair da tela cheia" : "Tela cheia (a tela não apaga)";
+  keepAwake(on);
+  if (on && narrowScreen()) toggleSidebar(false);
+  relayout(300);
+}
+const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+$("fullBtn").onclick = async () => {
+  if (fullOn) {
+    if (fsEl()) try { await (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) {}
+    return setFull(false);
+  }
+  const root = document.documentElement, req = root.requestFullscreen || root.webkitRequestFullscreen;
+  if (req) try { await req.call(root); } catch (e) {}
+  setFull(true);   // no iPhone (sem tela cheia no Safari) fica só a tela acordada e o livro maior
+};
+["fullscreenchange", "webkitfullscreenchange"].forEach(ev => document.addEventListener(ev, () => { if (!fsEl() && fullOn && (document.fullscreenEnabled || document.webkitFullscreenEnabled)) setFull(false); }));
 $("libraryBtn").onclick = () => document.body.classList.contains("view-library") ? showReader() : showLibrary();
 $("openBtn").onclick = chooseFile;
 $("chooseBtn").onclick = chooseFile;

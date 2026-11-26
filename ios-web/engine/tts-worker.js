@@ -6,7 +6,7 @@ const ORT = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/";
 const HF = "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/";
 const SR = 24000, SENTENCE_PAUSE = 0.18, PARAGRAPH_PAUSE = 0.45;
 
-importScripts(PIPER + ".js", ORT + "ort.webgpu.min.js");
+importScripts(PIPER + ".js", ORT + "ort.wasm.min.js");
 ort.env.wasm.wasmPaths = ORT;
 // com isolamento (cabeçalhos do sw.js) o modelo roda em várias threads: 2-4x mais rápido
 if (self.crossOriginIsolated) ort.env.wasm.numThreads = Math.max(1, Math.min(4, (self.navigator.hardwareConcurrency || 2) - 1));
@@ -22,7 +22,7 @@ async function init(vocabUrl) {
   postMessage({ type: "status", text: "Carregando a voz…" });
   // GPU, senão CPU com threads, senão CPU simples; cada tentativa tem prazo para nunca travar
   const tries = [];
-  if ("gpu" in self.navigator) tries.push(["webgpu", 0]);
+  // WebGPU fica de fora: com o modelo quantizado ele gera ruído no lugar da fala (medido com reconhecedor)
   if (self.crossOriginIsolated) tries.push(["wasm", ort.env.wasm.numThreads]);
   tries.push(["wasm", 1]);
   for (const [ep, threads] of tries) {

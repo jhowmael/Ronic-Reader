@@ -112,35 +112,47 @@
       describe: `${v ? v.label : s.voice} | velocidade ${s.rate} | volume ${s.volume}`,
       recent: await recent(), prefs: await kv("prefs", {}) };
   }
-  async function openBytes(bytes, name) {
-    const s = await load("store"), text = await load("text"), fmt = await load("formats");
-    const id = await s.fileId(bytes);
-    const existing = await s.get("books", id);
-    if (existing) return openStored(id);
-    window.RonicBackend.onStatus?.("Organizando o texto…");
+  // versão da leitura do texto: livros guardados com uma versão antiga são relidos do arquivo
+  const PARSER = 3;
+  async function parse(bytes, stem, id) {
+    const text = await load("text"), fmt = await load("formats");
     const isEpub = new Uint8Array(bytes.slice(0, 2)).toString() === "80,75";
-    const stem = name.replace(/\.(pdf|epub)$/i, "");
-    let book, cover;
     if (isEpub) {
       const e = await fmt.readEpub(bytes);
-      book = text.buildEpubBook({ id, name: stem, title: e.title, author: e.author, chapters: e.chapters });
-      cover = e.cover || await fmt.typographicCover(book.title, book.author);
-    } else {
-      const p = await fmt.readPdf(bytes);
-      book = text.buildPdfBook({ id, name: stem, pages: p.pages, outline: p.outline, aspect: p.aspect, title: p.title, author: p.author });
-      cover = p.cover;
+      const book = text.buildEpubBook({ id, name: stem, title: e.title, author: e.author, chapters: e.chapters });
+      return { book, cover: e.cover || await fmt.typographicCover(book.title, book.author) };
     }
+    const p = await fmt.readPdf(bytes);
+    return { book: text.buildPdfBook({ id, name: stem, pages: p.pages, outline: p.outline, aspect: p.aspect, title: p.title, author: p.author }), cover: p.cover };
+  }
+  async function openBytes(bytes, name) {
+    const s = await load("store");
+    const id = await s.fileId(bytes);
+    if (await s.get("books", id)) return openStored(id);
+    window.RonicBackend.onStatus?.("Organizando o texto…");
+    const stem = name.replace(/\.(pdf|epub)$/i, "");
+    const { book, cover } = await parse(bytes, stem, id);
     await s.put("files", bytes, id);
     await s.put("covers", cover, id);
-    await s.put("books", { id, name: book.title || stem, book, position: 0, opened: Date.now() });
+    await s.put("books", { id, name: book.title || stem, book, parser: PARSER, position: 0, opened: Date.now() });
     await s.persist();
     books.set(id, book);
+    window.RonicBackend.onStatus?.("");
     return { book, position: 0 };
   }
   async function openStored(id) {
     const s = await load("store");
     const rec = await s.get("books", id);
     if (!rec) throw new Error("Livro não encontrado na biblioteca.");
+    if (rec.parser !== PARSER) {   // relê com as regras novas, mantendo o lugar aproximado da leitura
+      const bytes = await s.get("files", id);
+      if (bytes) {
+        const old = rec.book, frac = (rec.position || 0) / Math.max(1, old.segments.length - 1);
+        rec.book = (await parse(bytes, rec.book.name || rec.name, id)).book;
+        rec.position = Math.round(frac * (rec.book.segments.length - 1)); rec.parser = PARSER;
+        await s.del("kv", "narration:" + id);
+      }
+    }
     rec.opened = Date.now(); await s.put("books", rec);
     const book = { ...rec.book, title: rec.custom_name || rec.book.title };
     books.set(id, book);

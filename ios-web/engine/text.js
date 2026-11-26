@@ -163,8 +163,15 @@ function titleFromCover(heads) {
   const good = runs.filter((r) => !/\b(LTDA|S\.?\/?A\.?|EIRELI|ME|INC|LLC)\b/i.test(r) && (r.match(/\p{L}/gu) || []).length >= 8);
   return good.length ? smartCase(good.reduce((a, b) => (b.length > a.length ? b : a))) : "";
 }
+// UTF-8 lido como PDFDocEncoding ("CÃ³digo" -> "Código"), como no app do Mac
+const PDFDOC = new Map([..."\u02d818\u02c719\u02c61a\u02d91b\u02dd1c\u02db1d\u02da1e\u02dc1f\u202280\u202081\u202182\u202683\u201484\u201385\u019286\u204487\u203988\u203a89\u22128a\u20308b\u201e8c\u201c8d\u201d8e\u20188f\u201990\u201a91\u212292\ufb0193\ufb0294\u014195\u015296\u016097\u017898\u017d99\u01319a\u01429b\u01539c\u01619d\u017e9e\u20aca0".matchAll(/([\s\S])([0-9a-f]{2})/g)].map((m) => [m[1], parseInt(m[2], 16)]));
+function fixMojibake(t) {
+  if (!/[ÃÂ]/.test(t)) return t;
+  const bytes = [...t].map((c) => PDFDOC.get(c) ?? (c.charCodeAt(0) < 256 ? c.charCodeAt(0) : 63));
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes)); } catch (e) { return t; }
+}
 export function cleanTitle(raw) {
-  let t = String(raw || "").trim()
+  let t = fixMojibake(String(raw || "").trim())
     .replace(/^(Microsoft (Word|PowerPoint)|Word|PowerPoint|Documentos? Google)\s*[-–:]\s*/i, "")
     .replace(/\.(docx?|odt|pages|rtf|pptx?|txt|pdf)$/i, "").trim();
   return /^(untitled|sem t[íi]tulo|documento\d*|document\d*|\W*)$/i.test(t) ? "" : t;
@@ -218,9 +225,9 @@ export function buildPdfBook({ id, name, pages, outline, aspect, title, author }
   return { id, name, total_pages: pages.length, aspect, title: t || name, author: author || "", format: "pdf", segments, chapters };
 }
 
-// EPUB (capítulos em blocos) -> livro em páginas virtuais
+// EPUB (capítulos em blocos) -> livro com uma página por capítulo
 export function buildEpubBook({ id, name, title, author, chapters: chs }) {
-  const PAGE = 1500, segments = [], chapters = [];
+  const PAGE = Infinity, segments = [], chapters = [];   // um capítulo = uma página (texto corrido)
   let page = 0;
   chs.forEach((ch) => {
     // "I" + "Do título." -> "I — Do título"
