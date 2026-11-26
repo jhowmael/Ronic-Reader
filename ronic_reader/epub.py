@@ -18,7 +18,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-PAGE_CHARS = 1500  # ~ uma página de livro de bolso
+PAGE_CHARS = 1100  # cabe numa página com letra confortável (o que passar, a página rola)
 
 BLOCK_TAGS = {"p", "div", "li", "blockquote", "pre", "dd", "dt", "td", "figcaption", "section", "article", "aside", "tr"}
 HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}

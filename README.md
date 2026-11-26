@@ -44,9 +44,10 @@
 ## Features
 
 * **An open book.** Each sheet is a page of the PDF (EPUB books are split into book-sized pages), with a 3D page turn. **Click or tap any paragraph** and reading starts there; the current paragraph is highlighted and pages turn on their own.
-* **Natural voices, Brazilian accent.** Online neural voices (Francisca, Thalita, Antônio and multilingual voices) and 11 **offline** Kokoro voices that run on your device. The offline voices were tuned and chosen by measuring their Brazilian accent with a phoneme recognizer (`voice-lab/sotaque.py`). Each voice shows its region in the list.
+* **Natural voices, Brazilian accent only.** Online neural voices (Francisca, Thalita, Antônio), 11 **offline** Kokoro voices tuned and measured for a Brazilian accent with a phoneme recognizer (`voice-lab/sotaque.py`), and on iPhone/iPad the device's own Brazilian voices, which start instantly.
 * **Narration by context.** One switch: the app finds how many narrators the book has (point-of-view chapters such as "3 — Briana", or a first-person narrator by gender) and reads each chapter with that narrator's voice. Pick a voice per narrator.
-* **Instant controls.** Speech speed from 0.5× to 2.5× without regenerating audio, voice switching that starts in about a second, focus mode that enlarges the book when the side panels are closed.
+* **One sidebar.** *Pages* (a grid of page numbers to jump around), *Voice* (voices, narration by context, fine-tuning) and *Display* (text size, one or two pages, theme, 11 accent colors).
+* **Comfortable reading.** Text size from 80% to 230% (⌘+ / ⌘−), one or two pages for PDF and EPUB, a “continua” hint when a page scrolls, full screen that keeps the screen awake, speech speed from 0.5× to 2.5×.
 * **Library.** Covers, search, reading position per book, rename, change the cover (an image or a page of the PDF).
 * **Clean text.** Removes repeated headers and footers, page numbers ("Página 4 de 15"), hyphenation and line breaks; finds chapters from the PDF outline, "Capítulo" headings or numbered sections, and a title from the cover when the file name says nothing.
 * **macOS extras.** Save the book as MP3 (one file per chapter), Liquid Glass look with a white or macOS accent color, light/dark theme, and a command line (`ronic book.pdf`).

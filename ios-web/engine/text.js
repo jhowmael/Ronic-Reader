@@ -225,9 +225,9 @@ export function buildPdfBook({ id, name, pages, outline, aspect, title, author }
   return { id, name, total_pages: pages.length, aspect, title: t || name, author: author || "", format: "pdf", segments, chapters };
 }
 
-// EPUB (capítulos em blocos) -> livro com uma página por capítulo
+// EPUB (capítulos em blocos) -> livro em páginas
 export function buildEpubBook({ id, name, title, author, chapters: chs }) {
-  const PAGE = Infinity, segments = [], chapters = [];   // um capítulo = uma página (texto corrido)
+  const PAGE = 1100, segments = [], chapters = [];   // igual a epub.PAGE_CHARS do app do Mac
   let page = 0;
   chs.forEach((ch) => {
     // "I" + "Do título." -> "I — Do título"

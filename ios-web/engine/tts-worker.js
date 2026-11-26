@@ -10,6 +10,8 @@ importScripts(PIPER + ".js", ORT + "ort.wasm.min.js");
 ort.env.wasm.wasmPaths = ORT;
 // com isolamento (cabeçalhos do sw.js) o modelo roda em várias threads: 2-4x mais rápido
 if (self.crossOriginIsolated) ort.env.wasm.numThreads = Math.max(1, Math.min(4, (self.navigator.hardwareConcurrency || 2) - 1));
+// iPhone/iPad: menos threads (memória curta; o sistema derruba o Worker se passar do limite)
+if (/iPhone|iPad|Mobile/.test(self.navigator.userAgent)) ort.env.wasm.numThreads = Math.min(ort.env.wasm.numThreads || 1, 2);
 
 let vocab = null, session = null, device = "wasm";
 const styles = new Map();
@@ -17,9 +19,18 @@ const styles = new Map();
 async function init(vocabUrl) {
   if (session) return;
   vocab = await (await fetch(vocabUrl)).json();
-  postMessage({ type: "status", text: "Baixando a voz (cerca de 90 MB, só na primeira vez)…" });
-  const model = await (await fetch(HF + "onnx/model_quantized.onnx")).arrayBuffer();
-  postMessage({ type: "status", text: "Carregando a voz…" });
+  const res = await fetch(HF + "onnx/model_quantized.onnx");
+  if (!res.ok) throw new Error("Sem internet para baixar a voz (só na primeira vez).");
+  const total = +res.headers.get("content-length") || 92e6, reader = res.body.getReader(), parts = [];
+  let got = 0, shown = -1;
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    parts.push(value); got += value.length;
+    const p = Math.min(99, Math.floor(got / total * 100));
+    if (p !== shown && p % 5 === 0) { shown = p; postMessage({ type: "status", phase: "download", text: `Baixando a voz ${p}% (só na primeira vez)` }); }
+  }
+  const model = new Uint8Array(got); { let o = 0; for (const c of parts) { model.set(c, o); o += c.length; } }
+  postMessage({ type: "status", phase: "load", text: "Carregando a voz…" });
   // GPU, senão CPU com threads, senão CPU simples; cada tentativa tem prazo para nunca travar
   const tries = [];
   // WebGPU fica de fora: com o modelo quantizado ele gera ruído no lugar da fala (medido com reconhecedor)
@@ -139,6 +150,7 @@ async function pump() {
       }
       job.chunks.push(new Float32Array(Math.round(SR * (PARAGRAPH_PAUSE - SENTENCE_PAUSE))));
     }
+    postMessage({ type: "progress", id: -1 });
     if (!job.units.length) {
       queue.splice(queue.indexOf(job), 1);
       const data = wav(job.chunks);
@@ -156,5 +168,11 @@ onmessage = (e) => {
   const m = e.data;
   if (m.type === "speak") { queue.push(m); pump(); }
   else if (m.type === "cancel") { for (let i = queue.length - 1; i >= 0; i--) if (m.ids.includes(queue[i].id)) { postMessage({ type: "error", id: queue[i].id, message: "cancelado", cancelled: true }); queue.splice(i, 1); } }
-  else if (m.type === "warm") init(m.vocab).catch((err) => postMessage({ type: "status", text: String(err) }));
+  else if (m.type === "warm") {
+    if (!queue.length && !busy) { busy = true; (async () => {
+      try { await init(m.vocab); const st = await styleFor(m.voice || "if_sara"); await speakPhonemes(ptbr(await phonemize("Olá.")), st, 1); }
+      catch (err) { postMessage({ type: "status", text: "" }); }
+      busy = false; pump();
+    })(); }
+  }
 };

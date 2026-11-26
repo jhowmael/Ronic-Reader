@@ -91,11 +91,9 @@ class App:
         voices = EDGE_VOICES + LOCAL_VOICES
         current = s.voice or DEFAULT_VOICE[s.engine]
         if not any(v["id"] == current for v in voices):
-            # voz salva que não está no catálogo (ex.: escolhida antes): continua visível
-            label = current.split("-")[2].replace("MultilingualNeural", "").replace("Neural", "") \
-                if current.count("-") >= 2 else current
-            voices = [{"id": current, "label": label, "desc": "voz em uso", "engine": s.engine,
-                       "group": "Em uso"}] + voices
+            # voz salva que saiu do catálogo (ex.: sotaque de fora): volta para a padrão do Brasil
+            engine = s.engine if s.engine in ("edge", "kokoro") else "edge"
+            s.engine, s.voice = engine, DEFAULT_VOICE[engine]
         return {
             "version": __version__,
             "voices": voices,

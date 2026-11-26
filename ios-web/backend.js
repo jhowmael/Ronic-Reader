@@ -30,15 +30,33 @@
   const books = new Map();
 
   // ------------------------------------------------------------------- voz
-  let worker = null, jobSeq = 0;
+  // O modelo roda num Worker. Se ele cair (o iPhone mata processos que usam muita memória) ou
+  // parar de responder, os pedidos falham com erro em vez de ficar "Preparando a voz…" para sempre,
+  // e o próximo pedido cria um Worker novo.
+  let worker = null, jobSeq = 0, lastActivity = 0, phase = "idle";
   const pending = new Map();
+  function resetWorker(message) {
+    if (worker) { try { worker.terminate(); } catch (e) {} }
+    worker = null; phase = "idle";
+    for (const [, p] of pending) { const err = new Error(message); err.retry = true; p.reject(err); }
+    pending.clear(); audioCache.clear();
+    window.RonicBackend.onStatus?.("");
+  }
+  setInterval(() => {
+    if (!worker || !pending.size) return;
+    const limit = phase === "download" ? 90000 : phase === "load" ? 60000 : 45000;
+    if (Date.now() - lastActivity > limit) resetWorker("A voz parou de responder e foi reiniciada.");
+  }, 3000);
   function tts() {
     if (!worker) {
       worker = new Worker(ENGINE + "tts-worker.js");
+      lastActivity = Date.now();
+      worker.onerror = (e) => { e.preventDefault?.(); resetWorker("A voz deste aparelho falhou e foi reiniciada."); };
       worker.onmessage = (e) => {
-        const m = e.data;
-        if (m.type === "status") window.RonicBackend.onStatus?.(m.text);
-        if (m.type === "ready") window.RonicBackend.onStatus?.("");
+        const m = e.data; lastActivity = Date.now();
+        if (m.type === "status") { phase = m.phase || phase; window.RonicBackend.onStatus?.(m.text); }
+        if (m.type === "ready") { phase = "run"; window.RonicBackend.onStatus?.(""); }
+        if (m.type === "progress") return;
         const p = pending.get(m.id); if (!p) return;
         pending.delete(m.id);
         if (m.type === "done") p.resolve(new Blob([m.wav], { type: "audio/wav" }));
@@ -50,11 +68,44 @@
   function speak(parts, s, priority) {
     const id = ++jobSeq;
     return new Promise((resolve, reject) => {
+      if (!pending.size) lastActivity = Date.now();
       pending.set(id, { resolve, reject });
       tts().postMessage({ type: "speak", id, parts, priority, vocab: new URL(ENGINE + "vocab.json", location.href).href,
         speed: Math.min(2, Math.max(0.5, 1 + pct(s.rate) / 100)), gain: Math.min(2, Math.max(0.3, 1 + pct(s.volume) / 100)) });
     });
   }
+  // aquece a voz (baixa e carrega o modelo) sem gerar nada: chamado ao abrir um livro
+  async function warm() {
+    const s = await settings();
+    if (s.engine !== "kokoro") return;
+    lastActivity = Date.now();
+    tts().postMessage({ type: "warm", vocab: new URL(ENGINE + "vocab.json", location.href).href, voice: s.voice });
+  }
+
+  // ------------------------------------------------ vozes do sistema (iOS, macOS, Android)
+  // Instantâneas e sem download: o próprio aparelho fala (speechSynthesis).
+  function systemVoices() {
+    if (!("speechSynthesis" in window)) return [];
+    // só sotaque do Brasil
+    // vozes de brincadeira do macOS/iOS (Grandma, Rocko, Zarvox…) ficam de fora
+    const JOKE = /\b(eddy|flo|grand(ma|pa)|reed|rocko|sandy|shelley|albert|bad news|bahh|bells|boing|bubbles|cellos|fred|good news|jester|junior|kathy|organ|ralph|superstar|trinoids|whisper|wobble|zarvox)\b/i;
+    const list = speechSynthesis.getVoices().filter((v) => /^pt[-_]BR$/i.test(v.lang) && !JOKE.test(v.name));
+    const br = (v) => /BR/i.test(v.lang);
+    const FEM = /luciana|joana|catarina|fernanda|francisca|helena|maria|vit[oó]ria|camila|let[ií]cia|thalita|raquel|female|feminina/i;
+    const MAS = /felipe|daniel|ant[oô]nio|duarte|jo[aã]o|ricardo|male|masculina/i;
+    return list.sort((a, b) => br(b) - br(a) || (b.localService - a.localService)).map((v) => {
+      const quality = /premium|enhanced|aprimorad|natural|neural/i.test(v.name) ? "alta qualidade" : "padrão";
+      const label = v.name.replace(/\s*\((?:Enhanced|Premium|Aprimorada?|português.*)\)\s*$/i, "").replace(/^Microsoft\s+|\s+Online.*$/g, "")
+        .replace(/^Google português do Brasil$/i, "Google").split(/\s[-–]\s/)[0];
+      const g = FEM.test(v.name) ? "F" : MAS.test(v.name) ? "M" : "?";
+      return { id: "sys:" + v.voiceURI, label, gender: g, engine: "system",
+        desc: `${g === "F" ? "feminina · " : g === "M" ? "masculina · " : ""}${quality}`,
+        group: "Brasil · voz do aparelho, instantânea", region: "Brasil" };
+    });
+  }
+  if ("speechSynthesis" in window) speechSynthesis.addEventListener?.("voiceschanged", () => window.refreshState?.());
+  const allVoices = async () => [...systemVoices(), ...(await voicesJson()).filter((v) => v.engine === "kokoro")];
+
   // cache de áudio desta sessão
   const audioCache = new Map();
   const MAX_AUDIO = 40;
@@ -74,7 +125,9 @@
   }
   // voz de cada narrador: escolha da pessoa, senão a principal (mesmo gênero), senão outra do gênero sem repetir
   async function narratorVoices(d, main) {
-    const cat = (await voicesJson()).filter((v) => v.engine === "kokoro");
+    const all = await allVoices();
+    const engine = all.find((v) => v.id === main)?.engine || "kokoro";
+    const cat = all.filter((v) => v.engine === engine);
     const mainG = cat.find((v) => v.id === main)?.gender;
     const out = {}, used = new Set();
     for (const n of d.analysis.narrators) {
@@ -106,14 +159,14 @@
   }
   async function state() {
     const s = await settings();
-    const voices = (await voicesJson()).filter((v) => v.engine === "kokoro");
+    const voices = await allVoices();
     const v = voices.find((x) => x.id === s.voice);
     return { version: "web", platform: "web", voices, presets: PRESETS, settings: s,
       describe: `${v ? v.label : s.voice} | velocidade ${s.rate} | volume ${s.volume}`,
       recent: await recent(), prefs: await kv("prefs", {}) };
   }
   // versão da leitura do texto: livros guardados com uma versão antiga são relidos do arquivo
-  const PARSER = 3;
+  const PARSER = 4;
   async function parse(bytes, stem, id) {
     const text = await load("text"), fmt = await load("formats");
     const isEpub = new Uint8Array(bytes.slice(0, 2)).toString() === "80,75";
@@ -222,7 +275,7 @@
   async function narrationState(book) {
     const s = await settings(), d = await narrationData(book);
     return { enabled: d.enabled, narrators: d.analysis.narrators, voices: await narratorVoices(d, s.voice),
-      pool: (await voicesJson()).filter((v) => v.engine === "kokoro") };
+      pool: await (async () => { const all = await allVoices(); const eng = all.find((v) => v.id === s.voice)?.engine || "kokoro"; return all.filter((v) => v.engine === eng); })() };
   }
 
   // áudio de um trecho: "full", "head" (1ª frase) ou "tail" (resto)
@@ -230,6 +283,7 @@
     const book = books.get(bookId); if (!book) throw new Error("Livro não está aberto.");
     const s = await settings();
     const voice = await voiceFor(book, i, s);
+    if (voice.startsWith("sys:")) return { speech: { text: book.segments[i].text, voice: voice.slice(4) }, served: "full" };
     const key = (pt) => `${bookId}:${i}:${pt}:${voice}:${s.rate}:${s.volume}`;
     if (part === "head" && audioCache.has(key("full"))) return { url: URL.createObjectURL(await audioCache.get(key("full"))), served: "full" };
     if (!audioCache.has(key(part))) {
@@ -243,7 +297,7 @@
     return { url: blob.size ? URL.createObjectURL(blob) : null, served: part };
   }
 
-  window.RonicBackend = { api, audio, onStatus: null };
+  window.RonicBackend = { api, audio, warm, onStatus: null };
   // ?demo=arquivo.pdf abre um livro de exemplo (usado nos testes e na página do GitHub)
   const demo = new URLSearchParams(location.search).get("demo");
   if (demo) window.addEventListener("load", () => setTimeout(async () => {
