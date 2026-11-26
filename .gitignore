@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+branding/out/
+*_audio/
+exemplos/exemplo_piper/
+exemplos/dom-casmurro.epub
+*.part
+voice-lab/.venv-lab/
+voice-lab/models/
+voice-lab/amostras/
+voice-lab/sotaque/
+voice-lab/refs/
+.DS_Store

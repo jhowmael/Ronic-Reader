@@ -1,0 +1,59 @@
+name: Release
+
+# Publishes the macOS download to GitHub Releases when a "v*" tag is pushed:
+#   git tag v1.0.0 && git push origin v1.0.0
+# Can also be triggered manually (builds the workflow artifacts only, no Release).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0-dev"; fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+      - name: Package (Apple Silicon)
+        run: PYTHON=python ./scripts/package-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            dist/RonicReader-macOS.zip
+            dist/RonicReader.dmg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Ronic Reader ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            ## Downloads
+            | System | File |
+            |---|---|
+            | macOS 13+ (Apple Silicon) | **RonicReader.dmg** (installer) or **RonicReader-macOS.zip** |
+            | iPad and iPhone | open https://jhowmael.github.io/Ronic-Reader/ in Safari → Share → **Add to Home Screen** |
+
+            Installation: see the [README](https://github.com/jhowmael/Ronic-Reader#installation).
+          files: |
+            dist/RonicReader-macOS.zip
+            dist/RonicReader.dmg
