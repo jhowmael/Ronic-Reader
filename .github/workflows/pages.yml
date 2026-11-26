@@ -1,16 +1,15 @@
 name: iPad and iPhone app (GitHub Pages)
 
 # Publishes the web app for iPad/iPhone at https://jhowmael.github.io/Ronic-Reader/
-# on every push to main. In the repository: Settings → Pages → Source: "GitHub Actions".
+# on every push to main, by pushing the built site to the "gh-pages" branch
+# (GitHub turns Pages on for that branch automatically; no settings needed).
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
@@ -19,19 +18,19 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - name: Build the web app
-        run: PY=python ./scripts/build-ios-web.sh
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+        run: |
+          PY=python ./scripts/build-ios-web.sh
+          touch build/ios-web/.nojekyll
+      - name: Publish to the gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: build/ios-web
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: build/ios-web
+          publish_branch: gh-pages
+          force_orphan: true
