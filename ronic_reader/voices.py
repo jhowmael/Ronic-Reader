@@ -18,6 +18,9 @@ EDGE_VOICES = [
     _v("pt-BR-ThalitaMultilingualNeural", "Thalita", "F", "expressiva", "edge", BR_ONLINE, "Brasil"),
     _v("pt-BR-AntonioNeural", "Antônio", "M", "grave", "edge", BR_ONLINE, "Brasil"),
 ]
+for _v_ in EDGE_VOICES:  # selo "Indicada" nas vozes mais naturais
+    if _v_["id"] in ("pt-BR-ThalitaMultilingualNeural", "pt-BR-AntonioNeural"):
+        _v_["badge"] = "good"
 # Kokoro (offline): todas falam com fonemas do português do Brasil; a ordem segue o sotaque
 # brasileiro medido no voice-lab (sotaque.py). Dora e Clara saíram: puxavam para Portugal.
 LOCAL_VOICES = [

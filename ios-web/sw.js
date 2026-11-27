@@ -1,7 +1,7 @@
 // Ronic Reader (iPad/iPhone): funciona offline depois da primeira visita.
 // App: busca na rede primeiro (para receber atualizações) e cai no cache sem internet.
 // Bibliotecas e modelo de voz (CDN e Hugging Face): cache primeiro (não mudam).
-const APP = "ronic-app-v3", ASSETS = "ronic-assets-v1";
+const APP = "ronic-app-v4", ASSETS = "ronic-assets-v1";
 // Isolamento de origem (COOP/COEP): o GitHub Pages não deixa mandar esses cabeçalhos,
 // então o service worker os acrescenta. Com isso a voz pode usar várias threads.
 function isolate(res) {
@@ -17,12 +17,15 @@ const SHELL = ["./", "index.html", "backend.js", "manifest.webmanifest", "engine
 
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(APP).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", (e) => {
-  e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== APP && k !== ASSETS).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+  // versões antigas guardavam os modelos de voz aqui também (cópia duplicada): libera o espaço
+  e.waitUntil(caches.open(ASSETS).then(async (c) => { for (const r of await c.keys()) if (r.url.endsWith(".onnx")) await c.delete(r); }).catch(() => {}));
+  e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== APP && k !== ASSETS && !k.startsWith("ronic-models")).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET") return;
   const external = /(^|\.)(jsdelivr\.net|huggingface\.co|hf\.co|xethub\.hf\.co)$/.test(url.hostname) || url.hostname.endsWith(".hf.co");
+  if (external && url.pathname.endsWith(".onnx")) return;   // modelos grandes: a voz baixa e guarda sozinha
   if (external) {
     // entrega a resposta na hora e guarda no cache em paralelo (antes esperava baixar tudo
     // para o cache: a voz de ~90 MB parecia travada e ia inteira para a memória)

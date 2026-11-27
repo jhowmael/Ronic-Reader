@@ -17,20 +17,33 @@ if (/iPhone|iPad|Mobile/.test(self.navigator.userAgent)) ort.env.wasm.numThreads
 const THREADS = ort.env.wasm.numThreads || 1;
 
 // ------------------------------------------------------------------ modelos
+// Modelos grandes (até 326 MB): baixa direto num único bloco de memória (antes ficavam várias
+// cópias ao mesmo tempo e o computador travava) e guarda no aparelho uma vez, depois de carregar.
+const MODELS = "ronic-models-v1";
 async function download(url, label, approx) {
+  try {
+    const hit = await (await caches.open(MODELS)).match(url);
+    if (hit) { postMessage({ type: "status", phase: "load", text: "Carregando a voz…" }); return new Uint8Array(await hit.arrayBuffer()); }
+  } catch (e) { /* sem cache: baixa */ }
   const res = await fetch(url);
   if (!res.ok) throw new Error("Sem internet para baixar a voz (só na primeira vez).");
-  const total = +res.headers.get("content-length") || approx, reader = res.body.getReader(), parts = [];
-  let got = 0, shown = -1;
+  const total = +res.headers.get("content-length") || 0, reader = res.body.getReader();
+  let out = new Uint8Array(total || approx), got = 0, shown = -1;
   for (;;) {
     const { done, value } = await reader.read(); if (done) break;
-    parts.push(value); got += value.length;
-    const p = Math.min(99, Math.floor(got / total * 100));
+    if (got + value.length > out.length) { const bigger = new Uint8Array(Math.max(out.length * 1.5, got + value.length)); bigger.set(out.subarray(0, got)); out = bigger; }
+    out.set(value, got); got += value.length;
+    const p = Math.min(99, Math.floor(got / (total || approx) * 100));
     if (p !== shown && p % 5 === 0) { shown = p; postMessage({ type: "status", phase: "download", text: `Baixando ${label} ${p}% (só na primeira vez)` }); }
   }
-  const out = new Uint8Array(got); let o = 0;
-  for (const c of parts) { out.set(c, o); o += c.length; }
+  out = got === out.length ? out : out.subarray(0, got);
+  out.fromNetwork = url;
   return out;
+}
+// guarda o modelo no aparelho (uma vez), para as próximas aberturas não baixarem de novo
+async function keep(model) {
+  if (!model.fromNetwork) return;
+  try { await (await caches.open(MODELS)).put(model.fromNetwork, new Response(model, { headers: { "Content-Type": "application/octet-stream" } })); } catch (e) {}
 }
 async function createSession(model, ep = "wasm") {
   postMessage({ type: "status", phase: "load", text: "Carregando a voz…" });
@@ -61,13 +74,17 @@ async function loadKokoro(vocabUrl, allowGpu = true) {
   vocab ||= await (await fetch(vocabUrl)).json();
   if (allowGpu && await gpuAvailable()) {
     try {
-      kokoro = await createSession(await download(HF + "onnx/model.onnx", "a voz", 326e6), "webgpu");
+      const model = await download(HF + "onnx/model.onnx", "a voz", 326e6);
+      kokoro = await createSession(model, "webgpu");
       postMessage({ type: "ready", device: "webgpu" });
+      await keep(model);
       return kokoro;
     } catch (e) { kokoro = null; }
   }
-  kokoro = await createSession(await download(HF + "onnx/model_quantized.onnx", "a voz", 92e6));
+  const model = await download(HF + "onnx/model_quantized.onnx", "a voz", 92e6);
+  kokoro = await createSession(model);
   postMessage({ type: "ready", device: "wasm" });
+  await keep(model);
   return kokoro;
 }
 async function voiceRows(name) {

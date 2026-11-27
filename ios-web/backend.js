@@ -28,7 +28,8 @@
   const RELAY = "https://ronic-reader-vozes.ronic-reader.workers.dev/";
   const EDGE_VOICES = RELAY ? [["pt-BR-FranciscaNeural", "Francisca", "F", "clara"], ["pt-BR-ThalitaMultilingualNeural", "Thalita", "F", "expressiva"],
     ["pt-BR-AntonioNeural", "Antônio", "M", "grave"]].map(([id, label, gender, d]) => ({ id, label, gender, engine: "edge",
-    desc: `${gender === "F" ? "feminina" : "masculina"} · ${d}`, group: "Brasil · online", region: "Brasil" })) : [];
+    desc: `${gender === "F" ? "feminina" : "masculina"} · ${d}`, group: "Brasil · online", region: "Brasil",
+    badge: id.includes("Thalita") || id.includes("Antonio") ? "good" : "" })) : [];
   const DEFAULT_SETTINGS = { engine: RELAY ? "edge" : "kokoro", voice: RELAY ? "pt-BR-FranciscaNeural" : SANTA, rate: "+0%", volume: "+0%", pitch: "+0Hz", expressiveness: 0.667, pause: 1 };
   async function kv(key, fallback) { const s = await load("store"); return (await s.get("kv", key)) ?? fallback; }
   async function setKv(key, value) { const s = await load("store"); await s.put("kv", value, key); return value; }
@@ -152,7 +153,7 @@
   }
   if ("speechSynthesis" in window) speechSynthesis.addEventListener?.("voiceschanged", () => window.refreshState?.());
   const allVoices = async () => [...EDGE_VOICES,
-    ...(await voicesJson()).filter((v) => NATIVE.includes(v.id)).map((v) => ({ ...v, desc: `masculina · ${v.id === SANTA ? "natural" : "firme"}, sem internet`, group: "Brasil · sem internet" })),
+    ...(await voicesJson()).filter((v) => NATIVE.includes(v.id)).map((v) => ({ ...v, desc: `masculina · ${v.id === SANTA ? "natural" : "firme"}, sem internet`, group: "Brasil · sem internet — carregamento mais demorado", badge: "bad" })),
     ...systemVoices()];
 
   // cache de áudio desta sessão
