@@ -1652,7 +1652,13 @@ function renderVoice() {
       if (sameRegion) row.querySelector(".region").remove();
       row.querySelector(".avatar").textContent = initials(v.label);
       row.querySelector("b").textContent = v.label; row.querySelector("small").textContent = sameRegion && v.region === "Brasil" ? v.desc.replace(/ · sotaque brasileiro,? ?/, " · ").replace(/ · $/, "") : v.desc;
-      row.onclick = () => { if (v.id !== s.voice) setDraft({ engine: v.engine, voice: v.id }); };
+      // trocar de voz vale na hora; só os ajustes (estilo e barras) esperam o "Salvar"
+      row.onclick = async () => {
+        if (v.id === s.voice) return;
+        const keep = draft; draft = null;
+        await applySettings({ ...state.settings, engine: v.engine, voice: v.id });
+        if (keep) setDraft({ rate: keep.rate, volume: keep.volume, pitch: keep.pitch, expressiveness: keep.expressiveness, pause: keep.pause, ppause: keep.ppause });
+      };
       // mouse parado sobre a voz: já prepara a 1ª frase nela, para a troca tocar na hora
       row.onmouseenter = () => { clearTimeout(row._t); row._t = setTimeout(() => {
         if (book && v.id !== s.voice) api("/api/prepare_voice", { method: "POST", json: { ...s, engine: v.engine, voice: v.id, id: book.id, index: pos } }).catch(() => {});
