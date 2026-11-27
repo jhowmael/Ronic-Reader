@@ -15,3 +15,5 @@ voice-lab/amostras/
 voice-lab/sotaque/
 voice-lab/refs/
 .DS_Store
+relay/.wrangler/
+relay/node_modules/

@@ -1091,7 +1091,14 @@ function showBook(data) {
   refreshState();
   // a voz já vai se preparando: baixa/carrega o modelo e gera a 1ª frase de onde parou
   if (window.RonicBackend) window.RonicBackend.warm?.();
-  setTimeout(() => { if (book && !playing && !voiceIsSystem()) { fetchPart(pos, "head")?.catch(() => {}); fetchPart(pos, "tail")?.catch(() => {}); } }, 400);
+  setTimeout(async () => {
+    if (!book || playing || voiceIsSystem()) return;
+    if (window.RonicBackend?.chunkCount) {   // web: os primeiros pedaços do ponto onde parou, já na fila
+      window.RonicBackend.focus(book.id, pos);
+      const n = await window.RonicBackend.chunkCount(book.id, pos);
+      for (let k = 0; k < Math.min(n, 3); k++) fetchPart(pos, "s" + k)?.catch(() => {});
+    } else { fetchPart(pos, "head")?.catch(() => {}); fetchPart(pos, "tail")?.catch(() => {}); }
+  }, 400);
   if (pos > 0) toast(`Continuando da página ${book.segments[pos].page}.`);
   else if (!prefs.hinted) { toast("Clique em um parágrafo para a leitura começar dali.", { ms: 5000 }); savePrefs({ hinted: true }); }
 }

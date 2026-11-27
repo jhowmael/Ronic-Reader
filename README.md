@@ -44,7 +44,7 @@
 ## Features
 
 * **An open book.** Each sheet is a page of the PDF (EPUB books are split into book-sized pages), with a 3D page turn. **Click or tap any paragraph** and reading starts there; the current paragraph is highlighted and pages turn on their own.
-* **Natural voices, Brazilian accent only.** On macOS: online neural voices (Francisca, Thalita, Antônio, always read as pt-BR) and 11 **offline** Kokoro voices tuned for a Brazilian accent. On the web: **Santa** (Kokoro's native Brazilian voice, on the GPU via WebGPU when available, about 4x faster than speech) and the device's own Brazilian voices, which start instantly.
+* **Natural voices, Brazilian accent only.** On macOS: online neural voices (Francisca, Thalita, Antônio, always read as pt-BR) and 11 **offline** Kokoro voices tuned for a Brazilian accent. On the web: Francisca, Thalita and Antônio through a small Cloudflare Worker (`relay/`, since Microsoft rejects websites), **Santa** (Kokoro's native Brazilian voice, on the GPU via WebGPU when available, about 4x faster than speech) and the device's own Brazilian voices, which start instantly.
 * **Narration by context.** One switch: the app finds how many narrators the book has (point-of-view chapters such as "3 — Briana", or a first-person narrator by gender) and reads each chapter with that narrator's voice. Pick a voice per narrator.
 * **One sidebar.** *Pages* (a grid of page numbers to jump around), *Voice* (voices, narration by context, fine-tuning) and *Display* (text size, one or two pages, theme, 11 accent colors).
 * **Comfortable reading.** Text size from 80% to 230% (⌘+ / ⌘−), one or two pages for PDF and EPUB, a “continua” hint when a page scrolls, full screen that keeps the screen awake, speech speed from 0.5× to 2.5×.

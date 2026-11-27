@@ -23,13 +23,20 @@
   const MOBILE = /iPhone|iPad|Android|Mobile/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   // Na web só vozes sem sotaque: o Santa (voz brasileira nativa do Kokoro) e as vozes pt-BR do próprio aparelho
   const SANTA = "pm_santa";
-  const DEFAULT_SETTINGS = { engine: "kokoro", voice: SANTA, rate: "+0%", volume: "+0%", pitch: "+0Hz", expressiveness: 0.667, pause: 1 };
+  // Vozes online (Francisca, Thalita, Antônio): a Microsoft recusa sites, então passam pela ponte
+  // relay/worker.js (Cloudflare Worker). Sem RELAY, a lista fica só com o Santa e as vozes do aparelho.
+  const RELAY = "https://ronic-reader-vozes.ronic-reader.workers.dev/";
+  const EDGE_VOICES = RELAY ? [["pt-BR-FranciscaNeural", "Francisca", "F", "clara"], ["pt-BR-ThalitaMultilingualNeural", "Thalita", "F", "expressiva"],
+    ["pt-BR-AntonioNeural", "Antônio", "M", "grave"]].map(([id, label, gender, d]) => ({ id, label, gender, engine: "edge",
+    desc: `${gender === "F" ? "feminina" : "masculina"} · ${d}`, group: "Brasil · online", region: "Brasil" })) : [];
+  const DEFAULT_SETTINGS = { engine: RELAY ? "edge" : "kokoro", voice: RELAY ? "pt-BR-FranciscaNeural" : SANTA, rate: "+0%", volume: "+0%", pitch: "+0Hz", expressiveness: 0.667, pause: 1 };
   async function kv(key, fallback) { const s = await load("store"); return (await s.get("kv", key)) ?? fallback; }
   async function setKv(key, value) { const s = await load("store"); await s.put("kv", value, key); return value; }
   async function settings() {
     const s = { ...DEFAULT_SETTINGS, ...(await kv("settings", DEFAULT_SETTINGS)) };
     // voz que saiu da lista (com sotaque, ou Piper): volta para o Santa
-    if (!s.voice.startsWith("sys:") && s.voice !== SANTA) return setKv("settings", { ...s, engine: "kokoro", voice: SANTA });
+    if (!s.voice.startsWith("sys:") && s.voice !== SANTA && !EDGE_VOICES.some((v) => v.id === s.voice))
+      return setKv("settings", { ...s, engine: DEFAULT_SETTINGS.engine, voice: DEFAULT_SETTINGS.voice });
     return s;
   }
 
@@ -87,6 +94,33 @@
         gpu: gpuOk(), expressiveness: s.expressiveness ?? 0.667, pitch: Math.pow(2, pct(s.pitch) / 120), pause: s.pause ?? 1, ppause: s.ppause ?? 1 });
     });
   }
+  // vozes online pela ponte: fila com prioridade, até 3 pedidos ao mesmo tempo
+  const relayQueue = []; let relayBusy = 0;
+  function relayTTS(text, s, priority) {
+    return new Promise((resolve, reject) => {
+      relayQueue.push({ text, s, priority, resolve, reject, id: ++jobSeq });
+      relayPump();
+    });
+  }
+  async function relayPump() {
+    while (relayBusy < 3 && relayQueue.length) {
+      relayQueue.sort((a, b) => b.priority - a.priority || a.id - b.id);
+      const job = relayQueue.shift(); relayBusy++;
+      (async () => {
+        let last;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const r = await fetch(RELAY, { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: job.text, voice: job.s.voice, rate: job.s.rate, pitch: job.s.pitch, volume: job.s.volume }) });
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `erro ${r.status}`);
+            return job.resolve(await r.blob());
+          } catch (e) { last = e; }
+        }
+        const err = new Error("As vozes online não responderam agora. Tente de novo ou escolha o Santa.");
+        err.cause = last; job.reject(err);
+      })().finally(() => { relayBusy--; relayPump(); });
+    }
+  }
   // aquece a voz (baixa e carrega o modelo) sem gerar nada: chamado ao abrir um livro
   async function warm() {
     const s = await settings();
@@ -117,7 +151,7 @@
     });
   }
   if ("speechSynthesis" in window) speechSynthesis.addEventListener?.("voiceschanged", () => window.refreshState?.());
-  const allVoices = async () => [
+  const allVoices = async () => [...EDGE_VOICES,
     ...(await voicesJson()).filter((v) => v.id === SANTA).map((v) => ({ ...v, desc: "masculina · natural, sem internet", group: "Brasil · sem internet" })),
     ...systemVoices()];
 
@@ -319,7 +353,9 @@
       if (!audioCache.has(key(part))) {
         const c = (await chunksOf(book, i))[+part.slice(1)];
         const priority = 10 - Math.max(0, Math.min(9, i - focusAt));
-        remember(key(part), c ? speak([{ voice, text: c.text, end: c.end }], s, priority, [bookId, i]) : Promise.resolve(new Blob([], { type: "audio/wav" })));
+        const online = voice.startsWith("pt-BR-");
+        remember(key(part), !c ? Promise.resolve(new Blob([], { type: "audio/wav" }))
+          : online ? relayTTS(c.text, { ...s, voice }, priority) : speak([{ voice, text: c.text, end: c.end }], s, priority, [bookId, i]));
       }
       const blob = await audioCache.get(key(part));
       return { url: blob.size ? URL.createObjectURL(blob) : null, served: part };
