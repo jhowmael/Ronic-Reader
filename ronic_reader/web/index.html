@@ -422,7 +422,8 @@ body.has-book #player { display: flex; }
 html[data-accent="system"] .avatar { color: var(--accent-strong); }
 .narrator .who { min-width: 0; }
 .narrator .who b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.narrator .who span { display: block; color: var(--label-3); font-size: 11px; }
+.narrator .who span { display: block; color: var(--label-3); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.narrator.context .who span { color: var(--accent-strong); font-weight: 600; }
 .ctrl { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; color: var(--label); flex: none; transition: background-color .15s, transform .09s; }
 .ctrl:hover { background: var(--fill); }
 .ctrl .ico { width: 19px; height: 19px; }
@@ -1105,7 +1106,7 @@ function showBook(data) {
   book.segments.forEach((s, i) => { if (!pageSegs.has(s.page)) pageSegs.set(s.page, []); pageSegs.get(s.page).push(i); });
   document.body.classList.add("has-book");
   $("exportBtn").hidden = false; narration = null;
-  if (currentTab === "voice") loadNarration();
+  loadNarration();
   $("seek").max = book.total_pages;
   renderChapters(); renderPages();
   document.body.classList.remove("view-library"); $("libraryBtn").classList.remove("on");
@@ -1175,6 +1176,24 @@ function chapterLabel(ch) {
   if (!ch) return "";
   if (ch.title === "Início" && book.chapters.length === 1) return book.title || book.name;
   return ch.title;
+}
+// Player: a voz que está lendo agora. Com a narração por contexto, mostra a voz do narrador
+// daquele capítulo e o nome dele ("Francisca" · "Briana · por contexto").
+function updateChip(i = pos) {
+  if (!state) return;
+  let v = currentVoice(), kind = v ? ENGINE_KIND[v.engine] || "" : "";
+  const ctx = !!(book && narration?.enabled);
+  if (ctx) {
+    const ch = chapterOfSeg(i);
+    const n = narration.narrators.find(x => x.chapters.includes(ch));
+    const nv = n && state.voices.find(x => x.id === narration.voices[n.id]);
+    if (nv) v = nv;
+    kind = n && narration.narrators.length > 1 ? `${n.name} · por contexto` : "por contexto";
+  }
+  $("narratorChip").classList.toggle("context", ctx);
+  if (!v) return;
+  $("chipAvatar").textContent = initials(v.label); $("chipName").textContent = v.label; $("chipKind").textContent = kind;
+  $("narratorChip").title = ctx ? `Narração por contexto: ${v.label}${kind.includes("·") ? " (" + kind.split(" ·")[0] + ")" : ""}` : "Trocar narrador";
 }
 function chapterOfSeg(i) { let n = 0; book.chapters.forEach((c, k) => { if (c.segment <= i) n = k; }); return n; }
 function chapterOfPage(p) {
@@ -1369,6 +1388,7 @@ function highlight(i) {
   const seg = book.segments[i];
   const ch = book.chapters[chapterOfSeg(i)];
   $("chapterName").textContent = book.title || book.name;
+  updateChip(i);
   $("seek").value = seg.page; paintRange($("seek"));
   $("pageInfo").textContent = `Página ${seg.page} de ${book.total_pages}`;
   updatePages(currentTab === "pages");
@@ -1642,7 +1662,7 @@ function renderVoice() {
     });
   }
   const v = currentVoice();
-  if (v) { $("chipAvatar").textContent = initials(v.label); $("chipName").textContent = v.label; $("chipKind").textContent = ENGINE_KIND[v.engine] || ""; }
+  updateChip();
   const seg = $("presets"); seg.replaceChildren();
   state.presets.forEach(p => {
     const b = document.createElement("button"); b.textContent = p.id === "dinamico" ? "Dinâmico" : p.id[0].toUpperCase() + p.id.slice(1); b.title = p.desc;
@@ -1703,6 +1723,7 @@ async function loadNarration() {
 function renderNarration() {
   const n = narration; if (!n) return;
   const box = $("narrSection"); box.hidden = false;
+  updateChip();   // ligou/desligou ou trocou a voz de um narrador: o player já mostra
   const opts = (sel) => ["F", "M"].map(g => `<optgroup label="${g === "F" ? "Femininas" : "Masculinas"}">` +
     n.pool.filter(v => v.gender === g).map(v => `<option value="${escapeHtml(v.id)}" ${v.id === sel ? "selected" : ""}>${escapeHtml(v.label)}</option>`).join("") + "</optgroup>").join("");
   const count = n.narrators.length;
