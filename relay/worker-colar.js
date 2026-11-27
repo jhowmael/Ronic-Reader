@@ -136,7 +136,10 @@ const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, 
 const sign = (v, unit, lo, hi) => { const n = Math.max(lo, Math.min(hi, parseInt(String(v || "0").replace(/[^\d+-]/g, ""), 10) || 0)); return `${n >= 0 ? "+" : ""}${n}${unit}`; };
 const hex = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
+// Abre a conversa com a Microsoft. Resolve quando chega o 1º pedaço de áudio (erros antes disso viram 502)
+// e devolve o MP3 como um ReadableStream, que vai saindo aos poucos enquanto a Microsoft gera.
 async function synthesize({ text, voice, rate, pitch, volume }) {
+  const t0 = Date.now(), timing = {};
   const url = `${WSS}&ConnectionId=${hex(16)}&Sec-MS-GEC=${secMsGec()}&Sec-MS-GEC-Version=2-${CHROMIUM}`;
   const res = await fetch(url, { headers: {
     Upgrade: "websocket", Origin: "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold",
@@ -145,35 +148,48 @@ async function synthesize({ text, voice, rate, pitch, volume }) {
   const ws = res.webSocket;
   if (!ws) throw new Error(`Microsoft recusou a conexão (${res.status})`);
   ws.accept();
+  timing.connect = Date.now() - t0;
   const ts = new Date().toString();
-  const chunks = [];
-  const done = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("sem resposta da Microsoft")), 25000);
-    ws.addEventListener("message", (e) => {
-      if (typeof e.data === "string") { if (e.data.includes("Path:turn.end")) { clearTimeout(timer); resolve(); } return; }
-      const b = new Uint8Array(e.data), hl = (b[0] << 8) | b[1];
-      const head = new TextDecoder().decode(b.subarray(2, 2 + hl));
-      if (head.includes("Path:audio") && b.length > 2 + hl) chunks.push(b.subarray(2 + hl));
-    });
-    ws.addEventListener("close", () => { clearTimeout(timer); resolve(); });
-    ws.addEventListener("error", () => { clearTimeout(timer); reject(new Error("erro na conexão com a Microsoft")); });
+  let controller, gotFirst, failFirst, firstSeen = false, finished = false;
+  const first = new Promise((ok, no) => { gotFirst = ok; failFirst = no; });
+  const rest = new ReadableStream({ start(c) { controller = c; } });
+  const timer = setTimeout(() => finish(new Error("sem resposta da Microsoft")), 25000);
+  function finish(err) {
+    if (finished) return; finished = true; clearTimeout(timer);
+    try { ws.close(); } catch (e) {}
+    timing.total = Date.now() - t0;
+    if (!firstSeen) return failFirst(err || new Error("a Microsoft não devolveu áudio"));
+    if (err) controller.error(err); else controller.close();
+  }
+  ws.addEventListener("message", (e) => {
+    if (typeof e.data === "string") { if (e.data.includes("Path:turn.end")) finish(); return; }
+    const b = new Uint8Array(e.data), hl = (b[0] << 8) | b[1];
+    const head = new TextDecoder().decode(b.subarray(2, 2 + hl));
+    if (!head.includes("Path:audio") || b.length <= 2 + hl) return;
+    controller.enqueue(b.slice(2 + hl));
+    if (!firstSeen) { firstSeen = true; timing.first = Date.now() - t0; gotFirst(); }
   });
+  ws.addEventListener("close", () => finish());
+  ws.addEventListener("error", () => finish(new Error("erro na conexão com a Microsoft")));
   ws.send(`X-Timestamp:${ts}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n` +
     '{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}');
   // sempre pt-BR: com en-US as vozes multilíngues (Thalita) às vezes leem em inglês
   ws.send(`X-RequestId:${hex(16)}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:${ts}Z\r\nPath:ssml\r\n\r\n` +
     `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='pt-BR'><voice name='${voice}'>` +
     `<prosody pitch='${sign(pitch, "Hz", -50, 50)}' rate='${sign(rate, "%", -50, 100)}' volume='${sign(volume, "%", -50, 50)}'>${esc(text)}</prosody></voice></speak>`);
-  await done;
-  try { ws.close(); } catch (e) {}
-  const total = chunks.reduce((n, c) => n + c.length, 0), out = new Uint8Array(total);
-  let o = 0; for (const c of chunks) { out.set(c, o); o += c.length; }
-  if (!total) throw new Error("a Microsoft não devolveu áudio");
-  return out;
+  await first;
+  return { rest, timing };
+}
+
+// mesmo texto + voz + ajustes = mesma chave de cache
+async function cacheKey(body) {
+  const raw = JSON.stringify([body.voice, sign(body.rate, "%", -50, 100), sign(body.pitch, "Hz", -50, 50), sign(body.volume, "%", -50, 50), body.text]);
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw)));
+  return new Request(`https://cache.ronic-reader/${[...d].map((b) => b.toString(16).padStart(2, "0")).join("")}.mp3`);
 }
 
 export default {
-  async fetch(req) {
+  async fetch(req, env, ctx) {
     const origin = req.headers.get("Origin") || "";
     if (!ORIGINS.includes(origin)) return new Response("Só para o Ronic Reader.", { status: 403 });
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(origin) });
@@ -183,8 +199,19 @@ export default {
       const text = String(body.text || "").trim();
       if (!text || text.length > 3000) throw new Error("texto vazio ou longo demais");
       if (!VOICES.has(body.voice)) throw new Error("voz não permitida");
-      const mp3 = await synthesize({ ...body, text });
-      return new Response(mp3, { headers: { ...cors(origin), "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
+      const t0 = Date.now(), expose = { "Access-Control-Expose-Headers": "X-Cache, Server-Timing" };
+      // 1) já gerado antes (mesmo texto, voz e ajustes)? sai do cache do Cloudflare na hora
+      const key = await cacheKey({ ...body, text }), cache = caches.default;
+      const hit = await cache.match(key);
+      if (hit) return new Response(hit.body, { headers: { ...cors(origin), ...expose, "Content-Type": "audio/mpeg", "X-Cache": "HIT",
+        "Server-Timing": `cache;dur=${Date.now() - t0}` } });
+      // 2) gera na Microsoft e manda os pedaços conforme chegam; uma cópia vai para o cache
+      const { rest, timing } = await synthesize({ ...body, text });
+      const [toClient, toCache] = rest.tee();
+      ctx.waitUntil(new Response(toCache).arrayBuffer().then((buf) => buf.byteLength &&
+        cache.put(key, new Response(buf, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=2592000" } }))).catch(() => {}));
+      return new Response(toClient, { headers: { ...cors(origin), ...expose, "Content-Type": "audio/mpeg", "Cache-Control": "no-store", "X-Cache": "MISS",
+        "Server-Timing": `connect;dur=${timing.connect}, first;dur=${timing.first}` } });
     } catch (e) {
       return new Response(JSON.stringify({ error: String(e.message || e) }), { status: 502, headers: { ...cors(origin), "Content-Type": "application/json" } });
     }

@@ -130,7 +130,8 @@
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
 /* destaque = cor do macOS (Ajustes do Sistema › Aparência); o app injeta --accent */
-html[data-accent="system"] {
+/* seletor mais forte que o do tema escuro (:root:not([data-theme])), senão o escuro devolvia o fundo branco */
+html:root[data-accent="system"]:not([data-accent-off]) {
   --accent: #007aff;
   --accent-strong: var(--accent);
   --primary-bg: var(--accent);
@@ -217,6 +218,12 @@ svg { display: block; }
 .side-meta { color: var(--label-3); font-size: 11px; font-variant-numeric: tabular-nums; }
 .chapter-num { width: 20px; flex: none; color: var(--label-3); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
 .side-empty { color: var(--label-3); padding: 4px 8px; }
+/* Salvar ajustes da voz: fica preso no rodapé da aba enquanto houver mudanças */
+.save-bar { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center; gap: 8px; margin: 14px -4px 0; padding: 10px 10px;
+  border-radius: 14px; background: var(--glass-solid); box-shadow: 0 -6px 20px rgba(0,0,0,.12), 0 0 0 .5px var(--edge); }
+.save-bar span { flex: 1; font-size: 12px; color: var(--label-2); }
+.save-bar button { height: 30px; padding: 0 14px; border-radius: 999px; font-weight: 600; }
+.btn-quiet { color: var(--label); background: var(--fill); }
 /* vidro líquido: brilho na borda de cima, reflexo suave no canto e desfoque forte do que está atrás */
 #sidebar.glass-thick {
   background: linear-gradient(165deg, color-mix(in srgb, #fff 16%, transparent), transparent 34%), var(--glass-thick);
@@ -226,6 +233,17 @@ svg { display: block; }
 #sidebar::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 0;
   background: radial-gradient(130% 55% at 0% 0%, color-mix(in srgb, #fff 20%, transparent), transparent 62%); mix-blend-mode: soft-light; }
 #sidebar > * { position: relative; z-index: 1; }
+/* tema escuro: barra lateral sólida (o vidro transparente ficava ruim sobre fundo escuro) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) #sidebar.glass-thick { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none;
+    box-shadow: 0 12px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06), 0 0 0 .5px var(--edge); }
+  :root:not([data-theme="light"]) #sidebar::before { display: none; }
+  :root:not([data-theme="light"]) .side-tabs button[aria-selected="true"] { background: color-mix(in srgb, var(--label) 12%, transparent); box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }
+}
+:root[data-theme="dark"] #sidebar.glass-thick { background: var(--glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none;
+  box-shadow: 0 12px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06), 0 0 0 .5px var(--edge); }
+:root[data-theme="dark"] #sidebar::before { display: none; }
+:root[data-theme="dark"] .side-tabs button[aria-selected="true"] { background: color-mix(in srgb, var(--label) 12%, transparent); box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }
 .side-tabs { background: color-mix(in srgb, var(--fill) 80%, transparent); box-shadow: inset 0 1px 2px rgba(0,0,0,.08), inset 0 0 0 .5px rgba(0,0,0,.04); }
 .side-tabs button[aria-selected="true"] { background: linear-gradient(180deg, color-mix(in srgb, #fff 14%, transparent), transparent), var(--glass-solid);
   box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 60%, transparent), 0 1px 4px rgba(0,0,0,.14), 0 0 0 .5px rgba(0,0,0,.06); }
@@ -651,6 +669,11 @@ html.web #app.no-sidebar #toolbar { padding-left: 12px; }
           </div>
           <p class="note"><button class="link" id="resetVoice">Restaurar padrão</button></p>
         </details>
+        <div class="save-bar" id="saveBar" hidden>
+          <span>Alterações não salvas</span>
+          <button class="btn-quiet" id="discardVoice">Descartar</button>
+          <button class="btn-primary" id="saveVoice">Salvar</button>
+        </div>
       </section>
       <section class="tab-panel" id="tab-view" role="tabpanel" hidden>
         <div class="set">
@@ -1473,6 +1496,7 @@ async function playAt(i, retried = false) {
   pos = i; highlight(i); ensureVisible(i); savePosition();
   const token = ++playToken;
   playing = true; setPlayIcon();
+  hushSystem(); utterances = [];              // nunca duas vozes juntas: cala a voz do aparelho
   if (voiceIsSystem()) { audio.pause(); audio.removeAttribute("src"); return playSystem(i, token); }
   const els = () => document.querySelectorAll(`#book .seg[data-i="${i}"]`);
   const fullKey = `${settingsVer}:${book.id}:${i}:full`;
@@ -1524,7 +1548,7 @@ async function prefetchAhead(i) {
     for (let k = 0; k < n; k++) fetchPart(j, "s" + k)?.catch(() => {});
   }
 }
-const hushSystem = () => { if ("speechSynthesis" in window) speechSynthesis.cancel(); };
+function hushSystem() { if ("speechSynthesis" in window) speechSynthesis.cancel(); }
 function stop() { playToken++; hushSystem(); audio.pause(); audio.removeAttribute("src"); playing = false; setPlayIcon(); $("status").textContent = ""; }
 function pause() { playToken++; hushSystem(); audio.pause(); playing = false; setPlayIcon(); $("status").textContent = ""; }
 function firstSegOfView() {
@@ -1583,9 +1607,17 @@ function fmtSigned(v, unit) { v = +v; return `${v > 0 ? "+" : ""}${v}${unit}`; }
 function num(s) { return parseInt(String(s).replace(/[^\d+-]/g, "")) || 0; }
 const ENGINE_KIND = { edge: "online", kokoro: "offline", piper: "offline", system: "do aparelho" };
 
+let draft = null;   // ajustes da voz ainda não salvos
+function setDraft(patch) {
+  draft = { ...(draft || state.settings), ...patch };
+  const same = ["engine", "voice", "rate", "volume", "pitch", "expressiveness", "pause", "ppause"].every(k => String(draft[k] ?? "") === String(state.settings[k] ?? ""));
+  if (same) draft = null;
+  renderVoice();
+}
 function renderVoice() {
   if (!state) return;
-  const s = state.settings, piper = s.engine === "piper", online = s.engine === "edge";
+  const s = draft || state.settings, piper = s.engine === "piper", online = s.engine === "edge";
+  $("saveBar").hidden = !draft;
   const list = $("voiceList"); list.replaceChildren();
   const groups = [...new Set(state.voices.map(v => v.group || ""))];
   for (const label of groups) {
@@ -1600,7 +1632,7 @@ function renderVoice() {
       if (sameRegion) row.querySelector(".region").remove();
       row.querySelector(".avatar").textContent = initials(v.label);
       row.querySelector("b").textContent = v.label; row.querySelector("small").textContent = sameRegion && v.region === "Brasil" ? v.desc.replace(/ · sotaque brasileiro,? ?/, " · ").replace(/ · $/, "") : v.desc;
-      row.onclick = () => { if (v.id !== s.voice) applySettings({ ...s, engine: v.engine, voice: v.id }); };
+      row.onclick = () => { if (v.id !== s.voice) setDraft({ engine: v.engine, voice: v.id }); };
       // mouse parado sobre a voz: já prepara a 1ª frase nela, para a troca tocar na hora
       row.onmouseenter = () => { clearTimeout(row._t); row._t = setTimeout(() => {
         if (book && v.id !== s.voice) api("/api/prepare_voice", { method: "POST", json: { ...s, engine: v.engine, voice: v.id, id: book.id, index: pos } }).catch(() => {});
@@ -1615,7 +1647,7 @@ function renderVoice() {
   state.presets.forEach(p => {
     const b = document.createElement("button"); b.textContent = p.id === "dinamico" ? "Dinâmico" : p.id[0].toUpperCase() + p.id.slice(1); b.title = p.desc;
     b.classList.toggle("on", num(p.rate) === num(s.rate) && num(p.volume) === num(s.volume) && (piper ? Math.abs(p.expressiveness - s.expressiveness) < .01 : num(p.pitch) === num(s.pitch)));
-    b.onclick = () => applySettings({ ...s, rate: p.rate, volume: p.volume, pitch: p.pitch, expressiveness: p.expressiveness });
+    b.onclick = () => setDraft({ rate: p.rate, volume: p.volume, pitch: p.pitch, expressiveness: p.expressiveness });
     seg.appendChild(b);
   });
   $("volume").value = num(s.volume); $("pitch").value = num(s.pitch); $("expr").value = s.expressiveness;
@@ -1634,11 +1666,11 @@ function updateSliderLabels() {
   $("pauseV").textContent = Math.round($("pause").value * 100) + "%"; $("ppauseV").textContent = Math.round($("ppause").value * 100) + "%";
 }
 function formSettings() {
-  return { ...state.settings, volume: fmtSigned($("volume").value, "%"), pitch: `${+$("pitch").value >= 0 ? "+" : ""}${$("pitch").value}Hz`,
+  return { ...(draft || state.settings), volume: fmtSigned($("volume").value, "%"), pitch: `${+$("pitch").value >= 0 ? "+" : ""}${$("pitch").value}Hz`,
     expressiveness: +$("expr").value, rate: fmtSigned($("rate").value, "%"), pause: +$("pause").value, ppause: +$("ppause").value };
 }
 let applyTimer;
-function scheduleApply(e) { paintRange(e.target); updateSliderLabels(); clearTimeout(applyTimer); applyTimer = setTimeout(() => applySettings(formSettings()), 500); }
+function scheduleApply(e) { paintRange(e.target); updateSliderLabels(); clearTimeout(applyTimer); applyTimer = setTimeout(() => setDraft(formSettings()), 150); }
 async function applySettings(s) {
   const s0voice = state?.settings?.voice;
   try {
@@ -1875,7 +1907,9 @@ $("speedBtn").onclick = speedMenu;
 document.querySelectorAll("#themeSeg button").forEach(b => b.onclick = () => { applyTheme(b.dataset.theme); savePrefs({ theme: b.dataset.theme }); });
 $("exportBtn").onclick = exportMenu;
 $("search").addEventListener("input", renderLibrary);
-$("resetVoice").onclick = () => applySettings({ ...state.settings, rate: "+0%", volume: "+0%", pitch: "+0Hz", expressiveness: 0.667, pause: 1, ppause: 1 });
+$("resetVoice").onclick = () => setDraft({ rate: "+0%", volume: "+0%", pitch: "+0Hz", expressiveness: 0.667, pause: 1, ppause: 1 });
+$("saveVoice").onclick = async () => { const d = draft; if (!d) return; draft = null; await applySettings(d); };
+$("discardVoice").onclick = () => { draft = null; renderVoice(); };
 ["rate", "volume", "pitch", "expr", "pause", "ppause"].forEach(id => $(id).addEventListener("input", scheduleApply));
 $("seek").addEventListener("input", () => { paintRange($("seek")); $("pageInfo").textContent = `Ir para a página ${$("seek").value}`; });
 $("seek").addEventListener("change", () => goToPage(+$("seek").value));

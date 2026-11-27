@@ -88,7 +88,7 @@ async function styleFor(voice) {
 async function kokoroSpeak(ph, style, speed) {
   const ids = [...ph].map((c) => vocab[c]).filter((x) => x !== undefined).slice(0, 508);
   if (!ids.length) return new Float32Array(0);
-  const row = Math.min(ids.length, 510) - 1;
+  const row = Math.min(ids.length, 509);
   const feeds = {
     [kokoro.inputNames[0]]: new ort.Tensor("int64", BigInt64Array.from([0, ...ids, 0].map(BigInt)), [1, ids.length + 2]),
     style: new ort.Tensor("float32", style.slice(row * 256, row * 256 + 256), [1, 256]),
@@ -161,16 +161,19 @@ const ptbr = (ph) => ph.replace(/y/g, "i").replace(/æ/g, "ɐ");
 // frases do texto em fonemas, sem passar de ~250 símbolos por inferência
 function phonemeSentences(ph) {
   const out = []; let cur = "";
-  for (const piece of ph.split(/(?<=[.!?…,;:])\s+/)) {
-    if (cur && cur.length + piece.length > 250) { out.push(cur); cur = piece; }
+  for (const piece of ph.split(/(?<=[.!?…])\s+/)) {
+    if (cur && cur.length + piece.length > 300) { out.push(cur); cur = piece; }
     else cur = cur ? cur + " " + piece : piece;
   }
   if (cur) out.push(cur);
-  // frase sem pontuação maior que o limite: corta nos espaços
+  // frase maior que o limite do modelo: corta numa vírgula (senão num espaço)
   return out.flatMap((s) => {
-    if (s.length <= 300) return [s];
+    if (s.length <= 400) return [s];
     const parts = []; let rest = s;
-    while (rest.length > 250) { let cut = rest.lastIndexOf(" ", 250); if (cut <= 0) cut = 250; parts.push(rest.slice(0, cut)); rest = rest.slice(cut).trim(); }
+    while (rest.length > 300) {
+      let cut = rest.lastIndexOf(", ", 300); if (cut < 80) cut = rest.lastIndexOf(" ", 300); else cut += 1;
+      if (cut <= 0) cut = 300; parts.push(rest.slice(0, cut)); rest = rest.slice(cut).trim();
+    }
     if (rest) parts.push(rest);
     return parts;
   });

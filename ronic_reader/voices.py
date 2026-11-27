@@ -33,6 +33,7 @@ LOCAL_VOICES = [
     _v("pm_alex", "Alex", "M", "natural", "kokoro", BR_LOCAL, "Brasil"),
     _v("mix:pm_alex*0.6+bm_george*0.4", "Jorge", "M", "firme", "kokoro", BR_LOCAL, "Brasil"),
 ]
+NATIVE_BR = ("pm_santa", "pm_alex")
 DEFAULT_VOICE = {"edge": "pt-BR-FranciscaNeural", "kokoro": "if_sara", "piper": "pt_BR-faber-medium"}
 
 
@@ -51,4 +52,6 @@ def gender_of(voice_id: str | None) -> str:
 
 def pool(engine: str, gender: str) -> list[str]:
     """Vozes de um motor e gênero, na ordem do catálogo (as mais claras primeiro)."""
-    return [v["id"] for v in catalog() if v["engine"] == engine and v.get("gender") == gender]
+    ids = [v["id"] for v in catalog() if v["engine"] == engine and v.get("gender") == gender]
+    # narradores sugeridos: primeiro as vozes brasileiras nativas (sem sotaque, medido no voice-lab)
+    return sorted(ids, key=lambda i: i not in NATIVE_BR)

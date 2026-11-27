@@ -22,7 +22,7 @@
   const pct = (s) => parseInt(String(s || "0").replace(/[^\d+-]/g, ""), 10) || 0;
   const MOBILE = /iPhone|iPad|Android|Mobile/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   // Na web só vozes sem sotaque: o Santa (voz brasileira nativa do Kokoro) e as vozes pt-BR do próprio aparelho
-  const SANTA = "pm_santa";
+  const SANTA = "pm_santa", NATIVE = [SANTA, "pm_alex"];   // vozes brasileiras nativas do Kokoro (sem sotaque, medido)
   // Vozes online (Francisca, Thalita, Antônio): a Microsoft recusa sites, então passam pela ponte
   // relay/worker.js (Cloudflare Worker). Sem RELAY, a lista fica só com o Santa e as vozes do aparelho.
   const RELAY = "https://ronic-reader-vozes.ronic-reader.workers.dev/";
@@ -35,7 +35,7 @@
   async function settings() {
     const s = { ...DEFAULT_SETTINGS, ...(await kv("settings", DEFAULT_SETTINGS)) };
     // voz que saiu da lista (com sotaque, ou Piper): volta para o Santa
-    if (!s.voice.startsWith("sys:") && s.voice !== SANTA && !EDGE_VOICES.some((v) => v.id === s.voice))
+    if (!s.voice.startsWith("sys:") && !NATIVE.includes(s.voice) && !EDGE_VOICES.some((v) => v.id === s.voice))
       return setKv("settings", { ...s, engine: DEFAULT_SETTINGS.engine, voice: DEFAULT_SETTINGS.voice });
     return s;
   }
@@ -152,7 +152,7 @@
   }
   if ("speechSynthesis" in window) speechSynthesis.addEventListener?.("voiceschanged", () => window.refreshState?.());
   const allVoices = async () => [...EDGE_VOICES,
-    ...(await voicesJson()).filter((v) => v.id === SANTA).map((v) => ({ ...v, desc: "masculina · natural, sem internet", group: "Brasil · sem internet" })),
+    ...(await voicesJson()).filter((v) => NATIVE.includes(v.id)).map((v) => ({ ...v, desc: `masculina · ${v.id === SANTA ? "natural" : "firme"}, sem internet`, group: "Brasil · sem internet" })),
     ...systemVoices()];
 
   // cache de áudio desta sessão
