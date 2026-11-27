@@ -1,7 +1,7 @@
 // Ronic Reader (iPad/iPhone): funciona offline depois da primeira visita.
 // App: busca na rede primeiro (para receber atualizações) e cai no cache sem internet.
 // Bibliotecas e modelo de voz (CDN e Hugging Face): cache primeiro (não mudam).
-const APP = "ronic-app-v2", ASSETS = "ronic-assets-v1";
+const APP = "ronic-app-v3", ASSETS = "ronic-assets-v1";
 // Isolamento de origem (COOP/COEP): o GitHub Pages não deixa mandar esses cabeçalhos,
 // então o service worker os acrescenta. Com isso a voz pode usar várias threads.
 function isolate(res) {
@@ -24,11 +24,13 @@ self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   const external = /(^|\.)(jsdelivr\.net|huggingface\.co|hf\.co|xethub\.hf\.co)$/.test(url.hostname) || url.hostname.endsWith(".hf.co");
   if (external) {
+    // entrega a resposta na hora e guarda no cache em paralelo (antes esperava baixar tudo
+    // para o cache: a voz de ~90 MB parecia travada e ia inteira para a memória)
     e.respondWith(caches.open(ASSETS).then(async (c) => {
       const hit = await c.match(e.request);
       if (hit) return hit;
       const res = await fetch(e.request);
-      if (res.ok) await c.put(e.request, res.clone());
+      if (res.ok) e.waitUntil(c.put(e.request, res.clone()).catch(() => {}));
       return res;
     }));
   } else if (url.origin === location.origin) {

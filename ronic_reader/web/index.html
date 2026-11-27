@@ -200,7 +200,7 @@ svg { display: block; }
 #app.no-sidebar { grid-template-columns: 0 1fr; }
 
 /* ---------- barra lateral ---------- */
-#sidebar { margin: 8px 0 8px 8px; border-radius: var(--r-xl); overflow: hidden; display: flex; flex-direction: column; min-width: 0;
+#sidebar { position: relative; margin: 8px 0 8px 8px; border-radius: var(--r-xl); overflow: hidden; display: flex; flex-direction: column; min-width: 0;
   transition: opacity .25s, transform .4s var(--ease), filter .4s; }
 #app.no-sidebar #sidebar { opacity: 0; transform: translateX(-16px); filter: blur(6px); pointer-events: none; }
 .sidebar-top { height: 44px; flex: none; }
@@ -217,6 +217,19 @@ svg { display: block; }
 .side-meta { color: var(--label-3); font-size: 11px; font-variant-numeric: tabular-nums; }
 .chapter-num { width: 20px; flex: none; color: var(--label-3); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
 .side-empty { color: var(--label-3); padding: 4px 8px; }
+/* vidro líquido: brilho na borda de cima, reflexo suave no canto e desfoque forte do que está atrás */
+#sidebar.glass-thick {
+  background: linear-gradient(165deg, color-mix(in srgb, #fff 16%, transparent), transparent 34%), var(--glass-thick);
+  -webkit-backdrop-filter: blur(50px) saturate(210%) brightness(1.03); backdrop-filter: blur(50px) saturate(210%) brightness(1.03);
+  box-shadow: 0 12px 40px rgba(0,0,0,.16), 0 2px 8px rgba(0,0,0,.08), inset 0 1px 0 color-mix(in srgb, #fff 55%, transparent),
+    inset 1px 0 0 color-mix(in srgb, #fff 18%, transparent), inset 0 -1px 0 rgba(0,0,0,.05), 0 0 0 .5px var(--edge); }
+#sidebar::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 0;
+  background: radial-gradient(130% 55% at 0% 0%, color-mix(in srgb, #fff 20%, transparent), transparent 62%); mix-blend-mode: soft-light; }
+#sidebar > * { position: relative; z-index: 1; }
+.side-tabs { background: color-mix(in srgb, var(--fill) 80%, transparent); box-shadow: inset 0 1px 2px rgba(0,0,0,.08), inset 0 0 0 .5px rgba(0,0,0,.04); }
+.side-tabs button[aria-selected="true"] { background: linear-gradient(180deg, color-mix(in srgb, #fff 14%, transparent), transparent), var(--glass-solid);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 60%, transparent), 0 1px 4px rgba(0,0,0,.14), 0 0 0 .5px rgba(0,0,0,.06); }
+.page-num { background: color-mix(in srgb, var(--fill) 100%, transparent); box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent), inset 0 0 0 .5px color-mix(in srgb, var(--label) 6%, transparent); }
 /* abas da barra lateral */
 .side-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; margin: 0 10px 6px; padding: 3px; border-radius: 11px; background: var(--fill); flex: none; }
 .side-tabs button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0 5px; border-radius: 8px; font-size: 11px; font-weight: 500; color: var(--label-2); transition: background-color .15s, color .15s; }
@@ -371,8 +384,9 @@ body.has-book:not(.view-library) #stage { display: block; animation: fadeIn .22s
 .turn:hover { color: var(--label); }
 .turn:disabled { opacity: 0 !important; }
 #turnPrev { left: 16px; }
-#turnNext { right: calc(16px + var(--reserve-r, 0px)); transition: right .4s var(--ease), opacity .2s; }
-.turn { top: calc(50% + var(--shift-y, -40px)); }
+#turnNext { right: 16px; }
+/* o botão de virar página nunca se mexe: posição fixa e sem animação de lugar */
+.turn, .turn:active, .turn:focus { top: calc(50% - 40px); transform: translateY(-50%); }
 /* modo foco (barra lateral fechada): durante a leitura, o reprodutor some quando o mouse fica parado */
 #player { transition: opacity .35s var(--ease), transform .35s var(--ease); }
 body.focus.idle #player { opacity: 0; transform: translate(-50%, 14px); pointer-events: none; }
@@ -503,6 +517,15 @@ details.tune .segmented { margin: 6px 6px 0; }
 body.dragging #dropOverlay { display: grid; }
 #dropOverlay .card-drop { padding: 34px 48px; border-radius: 24px; text-align: center; font: 600 17px/1.3 var(--font-display); letter-spacing: -0.01em; pointer-events: none; }
 #dropOverlay svg { width: 36px; height: 36px; margin: 0 auto 10px; color: var(--label); }
+/* modal de voz: vidro líquido por cima do livro desfocado */
+body.voice-wait #book, body.voice-wait .turn, body.voice-wait #library { filter: blur(6px) saturate(.92); }
+#book, #library { transition: filter .3s var(--ease); }
+#voiceVeil { position: fixed; inset: 0; z-index: 39; pointer-events: none; opacity: 0; transition: opacity .3s var(--ease);
+  background: color-mix(in srgb, var(--ground) 18%, transparent); }
+body.voice-wait #voiceVeil { opacity: 1; }
+#hud.voice { background: linear-gradient(160deg, color-mix(in srgb, #fff 18%, transparent), transparent 45%), var(--glass);
+  -webkit-backdrop-filter: blur(36px) saturate(200%); backdrop-filter: blur(36px) saturate(200%);
+  box-shadow: 0 20px 50px rgba(0,0,0,.22), inset 0 1px 0 color-mix(in srgb, #fff 60%, transparent), 0 0 0 .5px var(--edge); }
 #hud { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 40; border-radius: var(--r-xl); padding: 24px 28px; min-width: 220px; text-align: center; display: none; }
 #hud.on { display: block; animation: menuIn .2s var(--ease-out); }
 .spinner { width: 26px; height: 26px; margin: 0 auto 12px; border-radius: 50%; border: 2.5px solid var(--fill-2); border-top-color: var(--label); animation: spin .8s linear infinite; }
@@ -592,20 +615,39 @@ html.web #app.no-sidebar #toolbar { padding-left: 12px; }
       <section class="tab-panel" id="tab-voice" role="tabpanel" hidden>
         <div id="narrSection" hidden></div>
         <div id="voiceList"></div>
-        <details class="tune" id="tune">
+        <details class="tune" id="tune" open>
           <summary>Ajustes da voz</summary>
+          <div class="set-label" style="margin:8px 6px 6px;font-weight:500;color:var(--label-2)">Estilo de leitura</div>
           <div class="segmented" id="presets"></div>
+          <div class="slider-row">
+            <label for="rate">Velocidade da voz <span id="rateV"></span></label>
+            <input type="range" id="rate" min="-30" max="60" step="5">
+            <div class="ends"><span>devagar</span><span>rápida</span></div>
+          </div>
           <div class="slider-row">
             <label for="volume">Intensidade <span id="volumeV"></span></label>
             <input type="range" id="volume" min="-50" max="50" step="5">
+            <div class="ends"><span>suave</span><span>forte</span></div>
           </div>
           <div class="slider-row" id="pitchRow">
             <label for="pitch">Tom <span id="pitchV"></span></label>
             <input type="range" id="pitch" min="-30" max="30" step="1">
+            <div class="ends"><span>grave</span><span>agudo</span></div>
+          </div>
+          <div class="slider-row" id="pauseRow">
+            <label for="pause">Pausa entre frases <span id="pauseV"></span></label>
+            <input type="range" id="pause" min="0.2" max="2.5" step="0.1">
+            <div class="ends"><span>curta</span><span>longa</span></div>
+          </div>
+          <div class="slider-row" id="ppauseRow">
+            <label for="ppause">Pausa entre parágrafos <span id="ppauseV"></span></label>
+            <input type="range" id="ppause" min="0.2" max="2.5" step="0.1">
+            <div class="ends"><span>curta</span><span>longa</span></div>
           </div>
           <div class="slider-row" id="exprRow">
             <label for="expr">Expressividade <span id="exprV"></span></label>
             <input type="range" id="expr" min="0" max="1" step="0.05">
+            <div class="ends"><span>contida</span><span>expressiva</span></div>
           </div>
           <p class="note"><button class="link" id="resetVoice">Restaurar padrão</button></p>
         </details>
@@ -704,6 +746,7 @@ html.web #app.no-sidebar #toolbar { padding-left: 12px; }
 
 <div class="menu" id="menu" role="menu"></div>
 <div id="dropOverlay"><div class="card-drop glass"><svg class="ico"><use href="#i-book"/></svg>Solte o PDF ou EPUB para abrir</div></div>
+<div id="voiceVeil"></div>
 <div id="hud" class="glass" role="status"><div class="spinner"></div><div id="hudText"></div><div id="hudSub"></div></div>
 <div id="toast" class="glass" role="status" aria-live="polite"></div>
 <input type="file" id="fileInput" accept="application/pdf,.pdf,application/epub+zip,.epub" hidden>
@@ -759,6 +802,25 @@ function toast(msg, { ms = 3600, error = false } = {}) {
 function hud(on, text = "", sub = "") {
   $("hud").classList.toggle("on", on); $("hudText").textContent = text; $("hudSub").textContent = sub;
 }
+// Sempre que a voz estiver carregando (trocar de voz, começar a tocar, baixar o modelo):
+// modal de vidro no meio e o livro desfocado atrás, para ficar claro que está esperando a voz.
+let voiceWaitTimer = null;
+function voiceWait(text) {
+  const on = !!text && /voz/i.test(text);
+  clearTimeout(voiceWaitTimer);
+  if (!on) {
+    if (document.body.classList.contains("voice-wait")) { document.body.classList.remove("voice-wait"); $("hud").classList.remove("voice"); hud(false); }
+    return;
+  }
+  const show = () => {
+    document.body.classList.add("voice-wait"); $("hud").classList.add("voice");
+    const main = /baixando|carregando/i.test(text) ? "Preparando a voz…" : text;
+    hud(true, main, main === text ? (voiceName() ? `Voz: ${voiceName()}` : "") : text);
+  };
+  if (document.body.classList.contains("voice-wait")) show(); else voiceWaitTimer = setTimeout(show, 200);
+}
+const voiceName = () => currentVoice()?.label || "";
+new MutationObserver(() => voiceWait($("status").textContent)).observe($("status"), { childList: true, characterData: true, subtree: true });
 function initials(name) { return (name || "?").trim().charAt(0).toUpperCase(); }
 
 // ======================================================================
@@ -1315,7 +1377,7 @@ const fetchSeg = (i) => fetchPart(i, "full");
 function pruneBlobs() {
   for (const [key, p] of blobs) {
     const [ver, id, i] = key.split(":");
-    if (+ver !== settingsVer || id !== book?.id || +i < pos - 2 || +i > pos + 6) { p.then(r => URL.revokeObjectURL(r.url)).catch(() => {}); blobs.delete(key); }
+    if (+ver !== settingsVer || id !== book?.id || +i < pos - 1 || +i > pos + 6) { p.then(r => URL.revokeObjectURL(r.url)).catch(() => {}); blobs.delete(key); }
   }
 }
 
@@ -1334,29 +1396,70 @@ async function startAudio(url) {
 }
 // Voz do aparelho (iPhone, iPad, Mac): o sistema fala direto, sem gerar áudio — começa na hora
 const voiceIsSystem = () => !!(window.RonicBackend && state?.settings?.voice?.startsWith("sys:"));
-let utterances = [];
+let utterances = [], sysProgress = 0, sysVoice = null;
 async function playSystem(i, token) {
   let r;
   try { r = await fetchAudio(i, "full"); } catch (e) { playing = false; setPlayIcon(); toast(e.message, { error: true }); return; }
   if (token !== playToken || !r.speech) return;
-  const voice = speechSynthesis.getVoices().find(v => v.voiceURI === r.speech.voice);
-  // frase por frase: falas longas travam em alguns navegadores
-  const parts = r.speech.text.split(/(?<=[.!?…:;])\s+/).filter(t => t.trim());
+  sysVoice = speechSynthesis.getVoices().find(v => v.voiceURI === r.speech.voice) || null;
+  // frases curtas (até ~160 letras): falas longas param no meio em alguns navegadores
+  const parts = [];
+  for (const sent of r.speech.text.split(/(?<=[.!?…:;])\s+/).filter(t => t.trim())) {
+    let rest = sent;
+    while (rest.length > 160) { let cut = rest.lastIndexOf(", ", 160); cut = cut > 40 ? cut + 1 : rest.lastIndexOf(" ", 160); if (cut <= 0) cut = 160; parts.push(rest.slice(0, cut)); rest = rest.slice(cut).trim(); }
+    if (rest) parts.push(rest);
+  }
   speechSynthesis.cancel();
+  sysProgress = Date.now();
   utterances = parts.map((t, k) => {
     const u = new SpeechSynthesisUtterance(t);
-    if (voice) { u.voice = voice; u.lang = voice.lang; } else u.lang = "pt-BR";
+    if (sysVoice) { u.voice = sysVoice; u.lang = sysVoice.lang; } else u.lang = "pt-BR";
     u.rate = Math.min(2, Math.max(0.5, prefs.speed || 1));
-    if (k === parts.length - 1) u.onend = () => {
-      if (token !== playToken || !playing) return;
-      if (pos + 1 < book.segments.length) playAt(pos + 1); else { playing = false; setPlayIcon(); toast("Fim do livro."); }
+    u.pitch = Math.min(2, Math.max(0, 1 + (r.speech.pitch || 0) / 40));
+    u.volume = Math.min(1, Math.max(0.1, 1 + (r.speech.volume || 0) / 100));
+    u.onstart = () => { sysProgress = Date.now(); };
+    u.onend = () => {
+      sysProgress = Date.now(); u.done = true;
+      if (k === parts.length - 1 && token === playToken && playing) nextSegment();
     };
-    u.onerror = (e) => { if (token === playToken && !["interrupted", "canceled"].includes(e.error)) { playing = false; setPlayIcon(); toast("A voz do aparelho falhou neste trecho.", { error: true }); } };
+    u.onerror = (e) => { u.done = true; if (token === playToken && !["interrupted", "canceled"].includes(e.error)) { playing = false; setPlayIcon(); toast("A voz do aparelho falhou neste trecho.", { error: true }); } };
     return u;
   });
   $("status").textContent = "";
   utterances.forEach(u => speechSynthesis.speak(u));
 }
+function nextSegment() {
+  if (!book) return;
+  if (pos + 1 < book.segments.length) playAt(pos + 1); else { playing = false; setPlayIcon(); toast("Fim do livro."); }
+}
+// Vigia da leitura: se o som parar sem motivo (voz que não avisa que terminou, áudio que não
+// dispara o fim), a leitura segue sozinha do ponto em que parou.
+let audioProgress = 0, waitingFirst = false;
+Object.defineProperty(window, "waitingVoice", { get: () => playing && waitingFirst });   // usado pela versão web
+audio.addEventListener("timeupdate", () => { audioProgress = Date.now(); });
+audio.addEventListener("playing", () => { audioProgress = Date.now(); });
+setInterval(() => {
+  if (!playing || !book) return;
+  const now = Date.now();
+  if (voiceIsSystem()) {
+    if (!utterances.length) return;
+    // Chrome corta vozes online depois de ~15 s: pausar e retomar mantém viva
+    if (speechSynthesis.speaking && sysVoice && !sysVoice.localService && now - sysProgress > 9000) { speechSynthesis.pause(); speechSynthesis.resume(); sysProgress = now; }
+    if (!speechSynthesis.speaking && !speechSynthesis.pending && now - sysProgress > 1500) {
+      const left = utterances.filter(u => !u.done);
+      sysProgress = now;
+      if (!left.length) nextSegment();
+      else { left.forEach(u => speechSynthesis.speak(u)); }   // retoma as frases que ficaram
+    }
+    return;
+  }
+  if ($("status").textContent || waitingFirst) { audioProgress = now; return; }   // preparando: não é travamento
+  if (now - audioProgress < 3500 || !audio.src || audio.src.startsWith("data:")) return;
+  audioProgress = now;
+  if (!audio.ended && audio.paused && audio.currentTime > 0 && audio.currentTime < audio.duration - 0.2) audio.play().catch(() => {});
+  else if (audio.ended || (audio.paused && audio.currentTime >= audio.duration - 0.2)) audio.dispatchEvent(new Event("ended"));
+  else if (!audio.paused && audio.readyState < 3) audio.play().catch(() => {});
+}, 1000);
 async function playAt(i, retried = false) {
   if (!book) return;
   i = Math.max(0, Math.min(i, book.segments.length - 1));
@@ -1367,7 +1470,19 @@ async function playAt(i, retried = false) {
   const els = () => document.querySelectorAll(`#book .seg[data-i="${i}"]`);
   const fullKey = `${settingsVer}:${book.id}:${i}:full`;
   let first;
-  if (blobs.has(fullKey)) {            // já pré-gerado: toca inteiro
+  const onDevice = !!window.RonicBackend?.chunkCount;
+  if (onDevice) {                       // iPhone/iPad: frase a frase, numa fila que anda à frente da leitura
+    window.RonicBackend.focus(book.id, i);
+    const n = await window.RonicBackend.chunkCount(book.id, i);
+    if (token !== playToken) return;
+    if (!n) { if (i + 1 < book.segments.length) return playAt(i + 1); playing = false; setPlayIcon(); return; }
+    const parts = Array.from({ length: n }, (_, k) => fetchPart(i, "s" + k));
+    parts.forEach(p => p.catch(() => {}));
+    first = parts[0]; segQueue = parts.slice(1).map(p => p.then(r => r.url));
+    prefetchAhead(i);
+    const slow = setTimeout(() => { if (token === playToken) { $("status").textContent = "Preparando a voz…"; els().forEach(e => e.classList.add("loading")); } }, 300);
+    first.finally(() => clearTimeout(slow)).catch(() => {});
+  } else if (blobs.has(fullKey)) {      // já pré-gerado: toca inteiro
     first = fetchPart(i, "full"); segQueue = [];
   } else {                              // início rápido: 1ª frase já, o resto em paralelo
     $("status").textContent = "Preparando a voz…"; els().forEach(e => e.classList.add("loading"));
@@ -1376,10 +1491,12 @@ async function playAt(i, retried = false) {
     segQueue = [first.then(r => r.served === "full" ? null : tail.then(t => t.url))];
     tail.catch(() => {});
   }
+  waitingFirst = true;
   try {
     const r = await first;
     if (token !== playToken) return;
     await startAudio(r.url);
+    waitingFirst = false;
     $("status").textContent = "";
   } catch (e) {
     if (token !== playToken) return;
@@ -1387,12 +1504,18 @@ async function playAt(i, retried = false) {
     if (e.retry && !retried) { $("status").textContent = "Reiniciando a voz…"; return playAt(i, true); }   // a voz caiu: tenta de novo uma vez
     playing = false; setPlayIcon(); $("status").textContent = "";
     toast(e.message || "Não foi possível tocar este trecho.", { error: true, ms: 8000 });
-  } finally { els().forEach(e => e.classList.remove("loading")); }
-  // no iPad/iPhone a voz é gerada no aparelho: o próximo trecho vem em 1ª frase + resto, para começar logo
-  if (window.RonicBackend && !blobs.has(`${settingsVer}:${book.id}:${i + 1}:full`)) { fetchPart(i + 1, "head")?.catch(() => {}); fetchPart(i + 1, "tail")?.catch(() => {}); }
-  else fetchPart(i + 1);
-  fetchPart(i + 2);
+  } finally { if (token === playToken) waitingFirst = false; els().forEach(e => e.classList.remove("loading")); }
+  if (!onDevice) { fetchPart(i + 1); fetchPart(i + 2); fetchPart(i + 3); }   // Mac: os próximos já ficam prontos
   pruneBlobs();
+}
+// fila de pedaços dos próximos trechos (no aparelho), em ordem de leitura
+async function prefetchAhead(i) {
+  const id = book.id, ver = settingsVer;
+  for (let j = i + 1; j <= i + 3 && j < book.segments.length; j++) {
+    const n = await window.RonicBackend.chunkCount(id, j);
+    if (!book || book.id !== id || ver !== settingsVer || pos > j) return;
+    for (let k = 0; k < n; k++) fetchPart(j, "s" + k)?.catch(() => {});
+  }
 }
 const hushSystem = () => { if ("speechSynthesis" in window) speechSynthesis.cancel(); };
 function stop() { playToken++; hushSystem(); audio.pause(); audio.removeAttribute("src"); playing = false; setPlayIcon(); $("status").textContent = ""; }
@@ -1441,8 +1564,7 @@ audio.addEventListener("ended", async () => {
       if (url) { await startAudio(url); return; }
     } catch (e) { if (token !== playToken || e.status === 409) return; }
   }
-  if (pos + 1 < book.segments.length) playAt(pos + 1);
-  else { playing = false; setPlayIcon(); toast("Fim do livro."); }
+  nextSegment();
 });
 function paintRange(r) { r.style.setProperty("--fill-pct", ((r.value - r.min) / Math.max(1, r.max - r.min)) * 100 + "%"); }
 
@@ -1452,7 +1574,7 @@ function paintRange(r) { r.style.setProperty("--fill-pct", ((r.value - r.min) / 
 function currentVoice() { return state && state.voices.find(v => v.id === state.settings.voice); }
 function fmtSigned(v, unit) { v = +v; return `${v > 0 ? "+" : ""}${v}${unit}`; }
 function num(s) { return parseInt(String(s).replace(/[^\d+-]/g, "")) || 0; }
-const ENGINE_KIND = { edge: "online", kokoro: "offline", piper: "offline" };
+const ENGINE_KIND = { edge: "online", kokoro: "offline", piper: "offline", system: "do aparelho" };
 
 function renderVoice() {
   if (!state) return;
@@ -1490,24 +1612,39 @@ function renderVoice() {
     seg.appendChild(b);
   });
   $("volume").value = num(s.volume); $("pitch").value = num(s.pitch); $("expr").value = s.expressiveness;
-  $("pitchRow").hidden = !online; $("exprRow").hidden = !piper;
-  ["volume", "pitch", "expr"].forEach(id => paintRange($(id)));
+  $("rate").value = num(s.rate); $("pause").value = s.pause ?? 1; $("ppause").value = s.ppause ?? 1;
+  // cada barra só aparece quando a voz escolhida consegue usar
+  const web = !!window.RonicBackend;
+  $("pitchRow").hidden = !(online || s.engine === "system" || s.engine === "kokoro"); $("exprRow").hidden = !piper;
+  $("pauseRow").hidden = $("ppauseRow").hidden = !(web && s.engine === "kokoro");
+  ["rate", "volume", "pitch", "expr", "pause", "ppause"].forEach(id => paintRange($(id)));
   updateSliderLabels();
 }
 function updateSliderLabels() {
   $("volumeV").textContent = fmtSigned($("volume").value, "%"); $("pitchV").textContent = fmtSigned($("pitch").value, " Hz");
   $("exprV").textContent = Math.round($("expr").value * 100) + "%";
+  $("rateV").textContent = fmtSigned($("rate").value, "%");
+  $("pauseV").textContent = Math.round($("pause").value * 100) + "%"; $("ppauseV").textContent = Math.round($("ppause").value * 100) + "%";
 }
 function formSettings() {
   return { ...state.settings, volume: fmtSigned($("volume").value, "%"), pitch: `${+$("pitch").value >= 0 ? "+" : ""}${$("pitch").value}Hz`,
-    expressiveness: +$("expr").value };
+    expressiveness: +$("expr").value, rate: fmtSigned($("rate").value, "%"), pause: +$("pause").value, ppause: +$("ppause").value };
 }
 let applyTimer;
 function scheduleApply(e) { paintRange(e.target); updateSliderLabels(); clearTimeout(applyTimer); applyTimer = setTimeout(() => applySettings(formSettings()), 500); }
 async function applySettings(s) {
+  const s0voice = state?.settings?.voice;
   try {
     state = await api("/api/settings", { method: "POST", json: s }); prefs = state.prefs || prefs;
+    const changed = state.settings.voice !== s0voice;
     settingsVer++; pruneBlobs(); renderVoice(); renderLibrary();
+    // voz nova com a leitura parada: já prepara a 1ª frase nela (com o aviso de "Preparando a voz…")
+    if (changed && book && !playing && !voiceIsSystem()) {
+      window.RonicBackend?.warm?.();
+      const t = "Preparando a voz…"; $("status").textContent = t;
+      const done = () => { if ($("status").textContent === t) $("status").textContent = ""; };
+      (fetchPart(pos, window.RonicBackend?.chunkCount ? "s0" : "head") || Promise.resolve()).then(done, done);
+    }
     if (voiceTabOpen()) loadNarration();
     if (playing) playAt(pos);
   } catch (e) { toast(e.message, { error: true }); renderVoice(); }
@@ -1731,8 +1868,8 @@ $("speedBtn").onclick = speedMenu;
 document.querySelectorAll("#themeSeg button").forEach(b => b.onclick = () => { applyTheme(b.dataset.theme); savePrefs({ theme: b.dataset.theme }); });
 $("exportBtn").onclick = exportMenu;
 $("search").addEventListener("input", renderLibrary);
-$("resetVoice").onclick = () => applySettings({ engine: "edge", voice: "pt-BR-FranciscaNeural", rate: "+0%", volume: "+0%", pitch: "+0Hz", expressiveness: 0.667 });
-["volume", "pitch", "expr"].forEach(id => $(id).addEventListener("input", scheduleApply));
+$("resetVoice").onclick = () => applySettings({ ...state.settings, rate: "+0%", volume: "+0%", pitch: "+0Hz", expressiveness: 0.667, pause: 1, ppause: 1 });
+["rate", "volume", "pitch", "expr", "pause", "ppause"].forEach(id => $(id).addEventListener("input", scheduleApply));
 $("seek").addEventListener("input", () => { paintRange($("seek")); $("pageInfo").textContent = `Ir para a página ${$("seek").value}`; });
 $("seek").addEventListener("change", () => goToPage(+$("seek").value));
 $("book").addEventListener("click", (e) => { const el = e.target.closest(".seg"); if (el && !e.target.closest(".leaf")) playAt(+el.dataset.i); });

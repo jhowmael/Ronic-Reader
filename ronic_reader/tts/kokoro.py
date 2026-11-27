@@ -103,12 +103,14 @@ def phonemize_ptbr(text: str) -> str:
 
 
 class KokoroEngine:
-    def __init__(self, voice: str | None = None, rate: str = "+0%", volume: str = "+0%", **_ignored):
+    def __init__(self, voice: str | None = None, rate: str = "+0%", volume: str = "+0%", pitch: str = "+0Hz", **_ignored):
         self.kokoro = shared_model()
         self.voice = voice or DEFAULT_VOICE
         self._styles: dict[str, object] = {}
         self.speed = min(2.0, max(0.5, 1 + _percent(rate) / 100))
         self.gain = min(2.0, max(0.3, 1 + _percent(volume) / 100))
+        # tom: +30 Hz no painel ~ 3 semitons acima (mesma escala da versão web)
+        self.pitch = 2 ** (_percent(str(pitch).replace("Hz", "%")) / 120)
         try:
             import lameenc  # noqa: F401
 
@@ -124,9 +126,12 @@ class KokoroEngine:
 
     def _speak(self, text: str, voice: str | None = None) -> tuple[np.ndarray, int]:
         with _INFER_LOCK:
-            samples, sr = self.kokoro.create(phonemize_ptbr(text), voice=self._style(voice), speed=self.speed,
+            samples, sr = self.kokoro.create(phonemize_ptbr(text), voice=self._style(voice), speed=self.speed / self.pitch,
                                              lang="pt-br", is_phonemes=True)
-        return np.asarray(samples, dtype=np.float32) * self.gain, sr
+        audio = np.asarray(samples, dtype=np.float32)
+        if abs(self.pitch - 1) > 0.01:  # gera mais devagar e acelera reamostrando: mesma duração, tom diferente
+            audio = np.interp(np.arange(0, len(audio) - 1, self.pitch), np.arange(len(audio)), audio).astype(np.float32)
+        return audio * self.gain, sr
 
     def synthesize_part(self, chunks: list[str], out_path: Path, label: str = "") -> list[tuple[float, float, str]]:
         return self.synthesize_parts([(None, c) for c in chunks], out_path)

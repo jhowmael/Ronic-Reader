@@ -20,11 +20,18 @@
     { id: "estudo", rate: "+30%", volume: "+0%", pitch: "+0Hz", expressiveness: 0.6, desc: "bem rápido, para revisar" },
   ];
   const pct = (s) => parseInt(String(s || "0").replace(/[^\d+-]/g, ""), 10) || 0;
-  const DEFAULT_SETTINGS = { engine: "kokoro", voice: "if_sara", rate: "+0%", volume: "+0%", pitch: "+0Hz", expressiveness: 0.667 };
-
+  const MOBILE = /iPhone|iPad|Android|Mobile/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  // Na web só vozes sem sotaque: o Santa (voz brasileira nativa do Kokoro) e as vozes pt-BR do próprio aparelho
+  const SANTA = "pm_santa";
+  const DEFAULT_SETTINGS = { engine: "kokoro", voice: SANTA, rate: "+0%", volume: "+0%", pitch: "+0Hz", expressiveness: 0.667, pause: 1 };
   async function kv(key, fallback) { const s = await load("store"); return (await s.get("kv", key)) ?? fallback; }
   async function setKv(key, value) { const s = await load("store"); await s.put("kv", value, key); return value; }
-  const settings = () => kv("settings", DEFAULT_SETTINGS);
+  async function settings() {
+    const s = { ...DEFAULT_SETTINGS, ...(await kv("settings", DEFAULT_SETTINGS)) };
+    // voz que saiu da lista (com sotaque, ou Piper): volta para o Santa
+    if (!s.voice.startsWith("sys:") && s.voice !== SANTA) return setKv("settings", { ...s, engine: "kokoro", voice: SANTA });
+    return s;
+  }
 
   // livros abertos nesta sessão (com o texto já organizado)
   const books = new Map();
@@ -35,7 +42,10 @@
   // e o próximo pedido cria um Worker novo.
   let worker = null, jobSeq = 0, lastActivity = 0, phase = "idle";
   const pending = new Map();
+  const gpuOk = () => { try { return localStorage.getItem("ronic-nogpu") !== "1"; } catch (e) { return true; } };
+  let gpuLoading = false;
   function resetWorker(message) {
+    if (gpuLoading || phase === "load" || phase === "download") { try { localStorage.setItem("ronic-nogpu", "1"); } catch (e) {} }
     if (worker) { try { worker.terminate(); } catch (e) {} }
     worker = null; phase = "idle";
     for (const [, p] of pending) { const err = new Error(message); err.retry = true; p.reject(err); }
@@ -44,7 +54,7 @@
   }
   setInterval(() => {
     if (!worker || !pending.size) return;
-    const limit = phase === "download" ? 90000 : phase === "load" ? 60000 : 45000;
+    const limit = phase === "download" ? 90000 : phase === "load" ? 25000 : 45000;
     if (Date.now() - lastActivity > limit) resetWorker("A voz parou de responder e foi reiniciada.");
   }, 3000);
   function tts() {
@@ -54,8 +64,8 @@
       worker.onerror = (e) => { e.preventDefault?.(); resetWorker("A voz deste aparelho falhou e foi reiniciada."); };
       worker.onmessage = (e) => {
         const m = e.data; lastActivity = Date.now();
-        if (m.type === "status") { phase = m.phase || phase; window.RonicBackend.onStatus?.(m.text); }
-        if (m.type === "ready") { phase = "run"; window.RonicBackend.onStatus?.(""); }
+        if (m.type === "status") { phase = m.phase || phase; if (m.phase) gpuLoading = gpuOk(); window.RonicBackend.onStatus?.(m.text); }
+        if (m.type === "ready") { phase = "run"; gpuLoading = false; window.RonicBackend.onStatus?.(""); }
         if (m.type === "progress") return;
         const p = pending.get(m.id); if (!p) return;
         pending.delete(m.id);
@@ -65,13 +75,16 @@
     }
     return worker;
   }
-  function speak(parts, s, priority) {
+  const jobSeg = new Map();   // job -> [livro, trecho], para cancelar o que ficou longe da leitura
+  function speak(parts, s, priority, where) {
     const id = ++jobSeq;
+    if (where) jobSeg.set(id, where);
     return new Promise((resolve, reject) => {
       if (!pending.size) lastActivity = Date.now();
-      pending.set(id, { resolve, reject });
+      pending.set(id, { resolve: (v) => { jobSeg.delete(id); resolve(v); }, reject: (e) => { jobSeg.delete(id); reject(e); } });
       tts().postMessage({ type: "speak", id, parts, priority, vocab: new URL(ENGINE + "vocab.json", location.href).href,
-        speed: Math.min(2, Math.max(0.5, 1 + pct(s.rate) / 100)), gain: Math.min(2, Math.max(0.3, 1 + pct(s.volume) / 100)) });
+        speed: Math.min(2, Math.max(0.5, 1 + pct(s.rate) / 100)), gain: Math.min(2, Math.max(0.3, 1 + pct(s.volume) / 100)),
+        gpu: gpuOk(), expressiveness: s.expressiveness ?? 0.667, pitch: Math.pow(2, pct(s.pitch) / 120), pause: s.pause ?? 1, ppause: s.ppause ?? 1 });
     });
   }
   // aquece a voz (baixa e carrega o modelo) sem gerar nada: chamado ao abrir um livro
@@ -79,7 +92,7 @@
     const s = await settings();
     if (s.engine !== "kokoro") return;
     lastActivity = Date.now();
-    tts().postMessage({ type: "warm", vocab: new URL(ENGINE + "vocab.json", location.href).href, voice: s.voice });
+    tts().postMessage({ type: "warm", vocab: new URL(ENGINE + "vocab.json", location.href).href, voice: s.voice, gpu: gpuOk() });
   }
 
   // ------------------------------------------------ vozes do sistema (iOS, macOS, Android)
@@ -104,11 +117,13 @@
     });
   }
   if ("speechSynthesis" in window) speechSynthesis.addEventListener?.("voiceschanged", () => window.refreshState?.());
-  const allVoices = async () => [...systemVoices(), ...(await voicesJson()).filter((v) => v.engine === "kokoro")];
+  const allVoices = async () => [
+    ...(await voicesJson()).filter((v) => v.id === SANTA).map((v) => ({ ...v, desc: "masculina · natural, sem internet", group: "Brasil · sem internet" })),
+    ...systemVoices()];
 
   // cache de áudio desta sessão
   const audioCache = new Map();
-  const MAX_AUDIO = 40;
+  const MAX_AUDIO = 160;
   function remember(key, promise) {
     audioCache.set(key, promise);
     promise.catch(() => audioCache.delete(key));
@@ -278,13 +293,37 @@
       pool: await (async () => { const all = await allVoices(); const eng = all.find((v) => v.id === s.voice)?.engine || "kokoro"; return all.filter((v) => v.engine === eng); })() };
   }
 
-  // áudio de um trecho: "full", "head" (1ª frase) ou "tail" (resto)
+  // leitura em fila: o que está perto da posição atual vem primeiro; o que ficou para trás sai da fila
+  let focusAt = 0;
+  function focus(bookId, i) {
+    focusAt = i;
+    const ids = [...jobSeg].filter(([, [b, j]]) => b !== bookId || j < i || j > i + 3).map(([id]) => id);
+    if (ids.length && worker) worker.postMessage({ type: "cancel", ids });
+  }
+  async function chunksOf(book, i) {
+    const { speechChunks } = await load("text");
+    book._chunks ||= new Map();
+    if (!book._chunks.has(i)) book._chunks.set(i, speechChunks(book.segments[i].text));
+    return book._chunks.get(i);
+  }
+  async function chunkCount(bookId, i) { const book = books.get(bookId); return book ? (await chunksOf(book, i)).length : 0; }
+
+  // áudio de um trecho: "s<k>" (pedaço k, usado no iPhone/iPad), "full", "head" (1ª frase) ou "tail" (resto)
   async function audio(bookId, i, part) {
     const book = books.get(bookId); if (!book) throw new Error("Livro não está aberto.");
     const s = await settings();
     const voice = await voiceFor(book, i, s);
-    if (voice.startsWith("sys:")) return { speech: { text: book.segments[i].text, voice: voice.slice(4) }, served: "full" };
-    const key = (pt) => `${bookId}:${i}:${pt}:${voice}:${s.rate}:${s.volume}`;
+    if (voice.startsWith("sys:")) return { speech: { text: book.segments[i].text, voice: voice.slice(4), pitch: pct(s.pitch), volume: pct(s.volume) }, served: "full" };
+    const key = (pt) => `${bookId}:${i}:${pt}:${voice}:${s.rate}:${s.volume}:${s.pitch}:${s.pause}:${s.ppause}`;
+    if (/^s\d+$/.test(part)) {
+      if (!audioCache.has(key(part))) {
+        const c = (await chunksOf(book, i))[+part.slice(1)];
+        const priority = 10 - Math.max(0, Math.min(9, i - focusAt));
+        remember(key(part), c ? speak([{ voice, text: c.text, end: c.end }], s, priority, [bookId, i]) : Promise.resolve(new Blob([], { type: "audio/wav" })));
+      }
+      const blob = await audioCache.get(key(part));
+      return { url: blob.size ? URL.createObjectURL(blob) : null, served: part };
+    }
     if (part === "head" && audioCache.has(key("full"))) return { url: URL.createObjectURL(await audioCache.get(key("full"))), served: "full" };
     if (!audioCache.has(key(part))) {
       const { splitHead } = await load("text");
@@ -297,7 +336,7 @@
     return { url: blob.size ? URL.createObjectURL(blob) : null, served: part };
   }
 
-  window.RonicBackend = { api, audio, warm, onStatus: null };
+  window.RonicBackend = { api, audio, warm, focus, chunkCount, onStatus: null };
   // ?demo=arquivo.pdf abre um livro de exemplo (usado nos testes e na página do GitHub)
   const demo = new URLSearchParams(location.search).get("demo");
   if (demo) window.addEventListener("load", () => setTimeout(async () => {
@@ -305,7 +344,12 @@
     window.openFile?.(new File([blob], demo.split("/").pop(), { type: blob.type }));
   }, 300));
   // mostra o andamento da primeira carga da voz
-  window.RonicBackend.onStatus = (text) => { const s = document.getElementById("status"); if (s) s.textContent = text || ""; };
+  // andamento da voz (baixando/carregando); ao terminar, volta para "Preparando a voz…" se ainda falta o 1º áudio
+  window.RonicBackend.onStatus = (text) => {
+    const el = document.getElementById("status"); if (!el) return;
+    if (text) el.textContent = text;
+    else if (/Baixando|Carregando/.test(el.textContent)) el.textContent = window.waitingVoice ? "Preparando a voz…" : "";
+  };
 
   // modo offline: guarda o app e a voz no aparelho
   // na 1ª visita a página ainda não passou pelo service worker: recarrega uma vez para ficar isolada

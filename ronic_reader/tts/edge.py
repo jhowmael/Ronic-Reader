@@ -15,6 +15,21 @@ from pathlib import Path
 import aiohttp
 import edge_tts
 from edge_tts.exceptions import EdgeTTSException
+import edge_tts.communicate as _edge_comm
+
+
+def _ssml_ptbr(tc, escaped_text) -> str:
+    """SSML sempre em português do Brasil. O edge-tts manda xml:lang='en-US', e as vozes
+    multilíngues (Thalita) às vezes leem frases inteiras em inglês por causa disso."""
+    if isinstance(escaped_text, bytes):
+        escaped_text = escaped_text.decode("utf-8")
+    return ("<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='pt-BR'>"
+            f"<voice name='{tc.voice}'>"
+            f"<prosody pitch='{tc.pitch}' rate='{tc.rate}' volume='{tc.volume}'>{escaped_text}</prosody>"
+            "</voice></speak>")
+
+
+_edge_comm.mkssml = _ssml_ptbr
 
 from ..voice_settings import VOICE_ALIASES
 

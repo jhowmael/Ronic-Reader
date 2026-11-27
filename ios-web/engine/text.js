@@ -118,6 +118,20 @@ export function chunkText(text, max = 400) {
   if (buf) chunks.push(buf);
   return chunks;
 }
+// trecho -> pedaços de fala em ordem (o 1º curto, para começar logo); "end" diz a pausa depois dele
+export function speechChunks(text) {
+  const out = [];
+  for (const para of text.split("\n\n").map((p) => p.trim()).filter(Boolean)) {
+    let buf = "";
+    for (const s of splitSentences(para)) {
+      const limit = out.length === 0 ? 90 : 200;
+      if (buf && buf.length + 1 + s.length > limit) { out.push({ text: buf, end: "sentence" }); buf = s; }
+      else buf = buf ? `${buf} ${s}` : s;
+    }
+    if (buf) out.push({ text: buf, end: "paragraph" });
+  }
+  return out;
+}
 // primeira frase (para tocar já) e o resto
 export function splitHead(text, min = 25, max = 90) {
   const re = /[.!?…]["'”’»)]*\s+/g; let cut = null, m;

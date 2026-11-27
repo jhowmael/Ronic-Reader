@@ -39,12 +39,12 @@
 
 **macOS.** Open the `.dmg` and drag **Ronic Reader** to Applications. The app is not notarized by Apple, so the first time right-click it › **Open** (or run `xattr -dr com.apple.quarantine "/Applications/Ronic Reader.app"`).
 
-**iPad and iPhone.** Open the link in Safari › **Share** › **Add to Home Screen**. It runs like an app, works offline after the first use and keeps your library on the device. The voice model (about 90 MB) is downloaded the first time you press play.
+**iPad and iPhone.** Open the link in Safari › **Share** › **Add to Home Screen**. It runs like an app, works offline after the first use and keeps your library on the device. The voice model is downloaded once, the first time you open a book (326 MB on devices with WebGPU, 92 MB otherwise).
 
 ## Features
 
 * **An open book.** Each sheet is a page of the PDF (EPUB books are split into book-sized pages), with a 3D page turn. **Click or tap any paragraph** and reading starts there; the current paragraph is highlighted and pages turn on their own.
-* **Natural voices, Brazilian accent only.** Online neural voices (Francisca, Thalita, Antônio), 11 **offline** Kokoro voices tuned and measured for a Brazilian accent with a phoneme recognizer (`voice-lab/sotaque.py`), and on iPhone/iPad the device's own Brazilian voices, which start instantly.
+* **Natural voices, Brazilian accent only.** On macOS: online neural voices (Francisca, Thalita, Antônio, always read as pt-BR) and 11 **offline** Kokoro voices tuned for a Brazilian accent. On the web: **Santa** (Kokoro's native Brazilian voice, on the GPU via WebGPU when available, about 4x faster than speech) and the device's own Brazilian voices, which start instantly.
 * **Narration by context.** One switch: the app finds how many narrators the book has (point-of-view chapters such as "3 — Briana", or a first-person narrator by gender) and reads each chapter with that narrator's voice. Pick a voice per narrator.
 * **One sidebar.** *Pages* (a grid of page numbers to jump around), *Voice* (voices, narration by context, fine-tuning) and *Display* (text size, one or two pages, theme, 11 accent colors).
 * **Comfortable reading.** Text size from 80% to 230% (⌘+ / ⌘−), one or two pages for PDF and EPUB, a “continua” hint when a page scrolls, full screen that keeps the screen awake, speech speed from 0.5× to 2.5×.
